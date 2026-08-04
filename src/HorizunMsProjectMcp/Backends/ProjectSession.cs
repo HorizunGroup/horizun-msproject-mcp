@@ -97,8 +97,45 @@ public static class SessionStore
     private static readonly ConcurrentDictionary<string, ProjectSession> Sessions = new();
     private static int _counter;
 
+    /// <summary>
+    /// How many schedules may be open at once.
+    /// </summary>
+    /// <remarks>
+    /// A schedule stays in memory until it is closed, and a large one is not cheap: a 170 MB file
+    /// with 1,937 tasks costs around 400 MB resident. Nothing evicts them, so an agent that opens
+    /// documents and forgets to close them would climb until the process died — with no hint that
+    /// the cause was housekeeping. Refusing the twenty-first open, and naming what is holding the
+    /// memory, is far kinder than an out-of-memory kill.
+    /// </remarks>
+    public const int MaxOpenDocuments = 20;
+
     public static ProjectSession Add(string path, ProjectFile file, bool readOnly, bool authored = false)
     {
+        while (Sessions.Count >= MaxOpenDocuments)
+        {
+            // Retire the oldest document that has nothing unsaved. Refusing outright would punish
+            // a caller for reading a lot of schedules, which is a normal thing to do; discarding
+            // unsaved work to make room would be far worse. So only clean documents are evicted.
+            var evictable = Sessions.Values
+                .Where(s => !s.Dirty)
+                .OrderBy(s => s.OpenedAt)
+                .FirstOrDefault();
+
+            if (evictable is null)
+            {
+                var unsaved = string.Join(", ", Sessions.Values
+                    .OrderBy(s => s.OpenedAt)
+                    .Select(s => $"{s.Handle} ({System.IO.Path.GetFileName(s.Path)})"));
+
+                throw new McpToolException(
+                    $"All {Sessions.Count} open schedules have unsaved changes, so none can be closed to "
+                    + "make room, and none will be discarded to make room either. Save or close one "
+                    + $"first with project_save. Open, oldest first: {unsaved}.");
+            }
+
+            Sessions.TryRemove(evictable.Handle, out _);
+        }
+
         var handle = $"d{Interlocked.Increment(ref _counter)}";
         var session = new ProjectSession
         {

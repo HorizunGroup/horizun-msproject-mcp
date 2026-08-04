@@ -18,9 +18,19 @@ public sealed record HealthReport
     public required string Version { get; init; }
     public required string Backend { get; init; }
     public required RuntimeInfo Runtime { get; init; }
+    public required SessionInfo Sessions { get; init; }
     public required ComProbeResult MicrosoftProject { get; init; }
     public required IReadOnlyDictionary<string, bool> Capabilities { get; init; }
     public required IReadOnlyList<string> Notes { get; init; }
+}
+
+/// <summary>What is open and what it is costing, so housekeeping is visible before it bites.</summary>
+public sealed record SessionInfo
+{
+    public required int Open { get; init; }
+    public required int Limit { get; init; }
+    public required int MemoryMb { get; init; }
+    public required IReadOnlyList<string> Documents { get; init; }
 }
 
 public sealed record RuntimeInfo
@@ -60,9 +70,22 @@ public static class EnvironmentDoctor
             Version = ServerVersion,
             Backend = backend.ToString().ToLowerInvariant(),
             Runtime = DescribeRuntime(),
+            Sessions = DescribeSessions(),
             MicrosoftProject = project,
             Capabilities = DescribeCapabilities(backend, project),
             Notes = BuildNotes(backend, project, deep),
+        };
+    }
+
+    private static SessionInfo DescribeSessions()
+    {
+        var open = Backends.SessionStore.All();
+        return new SessionInfo
+        {
+            Open = open.Count,
+            Limit = Backends.SessionStore.MaxOpenDocuments,
+            MemoryMb = (int)(System.Diagnostics.Process.GetCurrentProcess().WorkingSet64 / 1024 / 1024),
+            Documents = open.Select(s => $"{s.Handle}: {System.IO.Path.GetFileName(s.Path)}").ToList(),
         };
     }
 

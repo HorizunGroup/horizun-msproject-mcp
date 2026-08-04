@@ -209,6 +209,61 @@ def main() -> int:
         check("no two tasks share a uid", len(uids) == len(set(uids)),
               f"{len(uids) - len(set(uids))} duplicates")
 
+        # ------------------------------------------------------- resource exhaustion
+        print("\n== open documents are bounded ==")
+
+        health = c.call("project_health")
+        limit = health["sessions"]["limit"]
+        check("project_health reports what is open and what it costs",
+              health["sessions"]["open"] >= 1 and health["sessions"]["memoryMb"] > 0,
+              f"{health['sessions']['open']}/{limit} open, "
+              f"{health['sessions']['memoryMb']} MB")
+
+        # Reading a lot of schedules is normal, so a clean one is retired to make room rather
+        # than the caller being told off.
+        seed = work / "reusable.xml"
+        c.call("project_save",
+               handle=c.call("project_open", path=str(seed), create=True,
+                             startDate="2026-09-07")["handle"],
+               op="save")
+
+        readonly_handles = []
+        for n in range(limit + 5):
+            r = c.call("project_open", path=str(seed), mode="readonly")
+            if "__error__" in r:
+                break
+            readonly_handles.append(r["handle"])
+
+        check("reading more schedules than the limit keeps working",
+              len(readonly_handles) == limit + 5,
+              f"{len(readonly_handles)} opened against a limit of {limit}")
+        check("and the count stays bounded rather than growing",
+              c.call("project_health")["sessions"]["open"] <= limit,
+              f"{c.call('project_health')['sessions']['open']} open")
+
+        # Unsaved work is never discarded to make room, even under pressure.
+        dirty = []
+        for n in range(limit):
+            r = c.call("project_open", path=str(work / f"dirty{n}.xml"), create=True,
+                       startDate="2026-09-07")
+            if "__error__" in r:
+                break
+            dirty.append(r["handle"])
+            c.call("tasks_write", handle=r["handle"],
+                   ops=[{"op": "create", "name": "unsaved", "duration": "1d"}])
+
+        refusal = c.call("project_open", path=str(work / "one-too-many.xml"), create=True,
+                         startDate="2026-09-07")
+        check("with every document unsaved, opening another is refused rather than losing work",
+              "__error__" in refusal and "unsaved changes" in refusal["__error__"],
+              str(refusal.get("__error__"))[:110])
+
+        for handle in dirty:
+            c.call("project_save", handle=handle, op="close", discardChanges=True)
+        check("closing frees the slots again",
+              "__error__" not in c.call("project_open", path=str(work / "after.xml"),
+                                        create=True, startDate="2026-09-07"))
+
         # -------------------------------------------------------- nested tool calls
         print("\n== tools built on other tools do not deadlock ==")
 
