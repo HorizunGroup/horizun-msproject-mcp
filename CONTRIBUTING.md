@@ -88,7 +88,7 @@ until the policy is updated — deliberately, since the file name is part of wha
 
 Listing in the registry runs separately, in `registry.yml`, and waits for NuGet to finish indexing
 before it starts. The registry proves ownership by fetching the published package and looking for
-`mcp-name: io.github.horizungroup/horizun-msproject-mcp` in its README — which is why that line
+`mcp-name: io.github.HorizunGroup/horizun-msproject-mcp` in its README — which is why that line
 lives in `README.md` and travels inside the package. Removing it silently breaks publishing to the
 registry while leaving NuGet unaffected.
 

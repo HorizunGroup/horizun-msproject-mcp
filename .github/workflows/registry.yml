@@ -6,7 +6,7 @@ name: publish to mcp registry
 # would fail on a race and look like a broken pipeline rather than a queue.
 #
 # Authenticated with GitHub OIDC, so there is no token to store: the registry trusts a
-# short-lived assertion that this repository produced the request, and the io.github.horizungroup
+# short-lived assertion that this repository produced the request, and the io.github.HorizunGroup
 # namespace is derived from the repository owner rather than claimed.
 on:
   workflow_dispatch:

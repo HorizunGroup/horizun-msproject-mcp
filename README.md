@@ -5,7 +5,7 @@
 **An MCP server for Microsoft Project that needs neither Java nor Microsoft Project — and tells you
 the truth about what it wrote.**
 
-<!-- mcp-name: io.github.horizungroup/horizun-msproject-mcp -->
+<!-- mcp-name: io.github.HorizunGroup/horizun-msproject-mcp -->
 <!-- The registry verifies ownership by finding that name in the published package's README.
      It has to travel inside the NuGet package, which is why it lives here rather than in a
      metadata file. -->
@@ -23,8 +23,7 @@ dotnet tool install -g HorizunMsProjectMcp
 That is the whole install. No JVM. No Microsoft Project. No licence. It reads and schedules on
 its own.
 
-*(Not on NuGet.org yet — until then, build the package with `dotnet pack -c Release` and install it
-with `dotnet tool install -g --add-source ./nupkg HorizunMsProjectMcp`.)*
+[![NuGet](https://img.shields.io/nuget/v/HorizunMsProjectMcp.svg)](https://www.nuget.org/packages/HorizunMsProjectMcp)
 
 ---
 
