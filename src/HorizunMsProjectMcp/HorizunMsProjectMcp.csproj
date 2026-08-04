@@ -32,6 +32,9 @@
     <PackageTags>mcp;model-context-protocol;microsoft-project;mpp;scheduling;critical-path;dcma;primavera;bim;4d</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/HorizunGroup/horizun-msproject-mcp</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/HorizunGroup/horizun-msproject-mcp</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
   <ItemGroup>

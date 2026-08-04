@@ -9,11 +9,14 @@ DCMA audit, what a two-week slip actually does to the finish date. Then write ch
 know which ones landed, because every one is re-read from the model before it is reported.
 
 ```bash
-dotnet tool install -g --add-source ./nupkg HorizunMsProjectMcp
+dotnet tool install -g HorizunMsProjectMcp
 ```
 
 That is the whole install. No JVM. No Microsoft Project. No licence. It reads and schedules on
 its own.
+
+*(Not on NuGet.org yet — until then, build the package with `dotnet pack -c Release` and install it
+with `dotnet tool install -g --add-source ./nupkg HorizunMsProjectMcp`.)*
 
 ---
 
