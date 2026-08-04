@@ -12,6 +12,7 @@ public sealed record QaReport
     public required int Failed { get; init; }
     public required int NotEvaluated { get; init; }
     public required IReadOnlyList<Finding> Findings { get; init; }
+    public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>
@@ -39,7 +40,24 @@ public static class Dcma14
     {
         var leaves = ScheduleAnalyzer.Leaves(project).ToList();
         var findings = new List<Finding>();
+        var reportNotes = new List<string>();
         var total = Math.Max(leaves.Count, 1);
+
+        // A schedule that finished before the status date is history, not a broken plan. Judging
+        // it against today would fail every progress check at 100% and bury the findings that do
+        // mean something.
+        var lastFinish = leaves.Where(t => t.Finish is not null).Max(t => t.Finish);
+        var historical = lastFinish is not null && lastFinish < statusDate;
+
+        if (historical)
+        {
+            reportNotes.Add(
+                $"Every task in this schedule finishes by {lastFinish:yyyy-MM-dd}, before the status date "
+                + $"{statusDate:yyyy-MM-dd}. It is being read as a historical or archived plan, so the "
+                + "progress checks that compare against the status date are reported as not evaluated "
+                + "rather than failing on every task. Pass a statusDate inside the schedule's own window "
+                + "to audit it as of a date it was live.");
+        }
 
         // ---- 1. Logic: every task needs a predecessor and a successor ----
         var noPred = leaves.Where(t => t.Predecessors.Count == 0).ToList();
@@ -117,10 +135,15 @@ public static class Dcma14
             (t.ActualFinish is not null && t.ActualFinish > statusDate) ||
             (t.ActualFinish is null && t.Finish is not null && t.Finish < statusDate && (t.PercentageComplete ?? 0) < 100))
             .ToList();
-        findings.Add(Ratio(
-            "dcma_09_invalid_dates", "Invalid dates (actuals in the future, or forecasts in the past)",
-            invalid.Count, total, 0,
-            invalid, $"Update progress against the status date ({statusDate:yyyy-MM-dd}) and reschedule incomplete work."));
+        findings.Add(historical
+            ? NotEvaluated(
+                "dcma_09_invalid_dates", "Invalid dates",
+                "The whole schedule predates the status date, so every incomplete task would count as a "
+                + "forecast in the past. Audit it against a status date within its own window.")
+            : Ratio(
+                "dcma_09_invalid_dates", "Invalid dates (actuals in the future, or forecasts in the past)",
+                invalid.Count, total, 0,
+                invalid, $"Update progress against the status date ({statusDate:yyyy-MM-dd}) and reschedule incomplete work."));
 
         // ---- 10. Resources ----
         var assignedUids = project.ResourceAssignments
@@ -190,7 +213,15 @@ public static class Dcma14
 
         // ---- 14. BEI (Baseline Execution Index) ----
         var dueByNow = withBaseline.Where(t => t.BaselineFinish <= statusDate).ToList();
-        if (dueByNow.Count == 0)
+        if (historical)
+        {
+            findings.Add(NotEvaluated(
+                "dcma_14_bei", "Baseline Execution Index",
+                "The whole schedule predates the status date, so every baselined task counts as due and "
+                + "the index measures the passage of time rather than execution. Audit it against a status "
+                + "date within its own window."));
+        }
+        else if (dueByNow.Count == 0)
         {
             findings.Add(NotEvaluated(
                 "dcma_14_bei", "Baseline Execution Index",
@@ -224,6 +255,7 @@ public static class Dcma14
             Failed = findings.Count(f => f.Passed == false),
             NotEvaluated = findings.Count(f => !f.Evaluated),
             Findings = findings,
+            Notes = reportNotes,
         };
     }
 
@@ -337,6 +369,35 @@ public static class Dcma14
         yield return Ratio(
             "hrz_unnamed_tasks", "Tasks with no name",
             unnamed.Count, total, 0, unnamed, "Name every task.");
+
+        // A baselined plan with no progress recorded anywhere is a schedule nobody is updating.
+        // Every variance, index and forecast it produces is arithmetic on a frozen plan, and a
+        // report built from it will look precise while meaning nothing.
+        var baselined = leaves.Count(t => t.BaselineFinish is not null);
+        var withProgress = leaves.Count(t =>
+            (t.PercentageComplete ?? 0) > 0 || t.ActualStart is not null || t.ActualFinish is not null);
+
+        if (baselined > 0)
+        {
+            var stale = withProgress == 0;
+            yield return new Finding
+            {
+                Rule = "hrz_progress_recorded",
+                Severity = stale ? "warning" : "info",
+                Summary = stale
+                    ? $"A baseline is stored for {baselined} task(s) but not one task carries progress — "
+                      + "no percentage complete, no actual dates. Nothing is being tracked against the plan."
+                    : $"{withProgress} of {leaves.Count} task(s) carry progress against the stored baseline.",
+                Measured = leaves.Count == 0 ? 0 : Math.Round(100.0 * withProgress / leaves.Count, 2),
+                Threshold = 0,
+                Passed = !stale,
+                FixHint = stale
+                    ? "Record actual dates and percentage complete before reading anything into SPI, BEI or "
+                      + "the variance figures — on a frozen plan they measure the passage of time, not "
+                      + "execution."
+                    : null,
+            };
+        }
 
         // The link to the budget — and therefore to BIM and to the cost model.
         if (!string.IsNullOrWhiteSpace(budgetCodeField))

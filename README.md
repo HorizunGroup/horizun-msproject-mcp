@@ -107,6 +107,10 @@ the file backend and **refuse rather than approximate**:
 - **`level_resources`** — Microsoft Project's levelling heuristic is unpublished. Any imitation
   would be a different answer wearing the same name.
 
+Saving over a baseline that already holds data is refused too, unless you ask for it explicitly.
+A baseline is the record of the original plan that every variance is measured against, and it
+cannot be recovered from the file afterwards.
+
 Everything else — scheduling, recalculation, dry-run simulation, rescheduling incomplete work, the
 DCMA Critical Path Test — is served by this server's own critical-path engine and works on both
 backends.
@@ -166,11 +170,11 @@ can do.
 ```bash
 cd src/HorizunMsProjectMcp && dotnet build && cd ../..
 python tools/acceptance-test.py   # 65 checks, all 20 tools end to end
-python tools/scheduler-test.py    # 37 checks, critical-path engine correctness
+python tools/scheduler-test.py    # 45 checks, critical-path engine correctness
 python tools/smoke-test.py        # 13 checks, environment and capabilities
 ```
 
-**115 checks**, driven over real JSON-RPC against the running server.
+**123 checks**, driven over real JSON-RPC against the running server.
 
 The acceptance suite builds a construction schedule from nothing and asserts the contracts above:
 that a dry run commits nothing, that a cycle is refused before it is applied, that a write to an
@@ -185,9 +189,10 @@ full round trips through Primavera XER and PMXML and through a real binary `.mpp
 written by Microsoft Project itself, read back by MPXJ, with dates, milestone flags, budget codes
 and dependencies all intact.
 
-Beyond the suites, the server has been driven through a planner's full working cycle on a
-production 5,985-task construction schedule — open, audit, baseline, record progress, measure
-earned value, export the Power BI dataset — and read against files of up to 7,000 tasks and 170 MB.
+Beyond the suites, the server has been driven through a planner's full working cycle on two
+production construction schedules — a 5,985-task programme and a 170 MB, 1,937-task one — opening,
+auditing, baselining, recording progress, measuring earned value and exporting the Power BI
+dataset, and read against files of up to 7,000 tasks.
 
 Rebuild the installable package with `dotnet pack -c Release`.
 
@@ -214,7 +219,7 @@ src/HorizunMsProjectMcp/
   Tools/         the 20 MCP tools
 tools/
   acceptance-test.py   end-to-end across all 20 tools, 65 checks
-  scheduler-test.py    critical-path engine correctness + format round trips, 37 checks
+  scheduler-test.py    engine correctness, format round trips, safety guards, 45 checks
   smoke-test.py        environment and capability matrix, 13 checks
 ```
 

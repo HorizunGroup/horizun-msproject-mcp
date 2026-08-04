@@ -363,6 +363,48 @@ def main() -> int:
 
         client.call("project_save", handle=reopened, op="close", discardChanges=True)
 
+        # ----------------------------------------------------- baselines are protected
+        print("\n== a stored baseline is not overwritten by accident ==")
+
+        handle, _ = build(client, workdir, "baseline", [
+            {"name": "A", "duration": "5d"}, {"name": "B", "duration": "5d"},
+        ], [{"op": "link", "from": "A", "to": "B", "type": "FS"}])
+        first = client.call("schedule_update", handle=handle, op="save_baseline", baseline=0)
+        check("the first baseline saves", first.get("applied") == 1, json.dumps(first)[:100])
+
+        again = client.call("schedule_update", handle=handle, op="save_baseline", baseline=0)
+        check("saving over it is refused",
+              "__error__" in again and "destroy" in again["__error__"],
+              again.get("__error__", json.dumps(again))[:130])
+        check("and the refusal points at the empty slots",
+              "project_info" in again.get("__error__", ""),
+              "")
+
+        spare = client.call("schedule_update", handle=handle, op="save_baseline", baseline=3)
+        check("an empty slot accepts it", spare.get("applied") == 1, json.dumps(spare)[:100])
+
+        forced = client.call("schedule_update", handle=handle, op="save_baseline",
+                             baseline=0, overwriteBaseline=True)
+        check("overwriting is possible when asked for explicitly",
+              forced.get("applied") == 1, json.dumps(forced)[:100])
+
+        # A baselined plan nobody updates produces precise-looking numbers that mean nothing.
+        qa = client.call("schedule_qa", handle=handle)
+        stale = next((f for f in qa["findings"] if f["rule"] == "hrz_progress_recorded"), None)
+        check("a baseline with no progress recorded anywhere is flagged",
+              stale is not None and stale.get("passed") is False,
+              stale["summary"][:110] if stale else "rule missing")
+
+        # ----------------------------------------- a historical schedule is not a broken one
+        print("\n== historical schedules ==")
+        qa_future = client.call("schedule_qa", handle=handle, statusDate="2030-01-01")
+        check("auditing long after the schedule ended says so instead of failing everything",
+              any("historical" in n.lower() for n in qa_future.get("notes", [])),
+              json.dumps(qa_future.get("notes"))[:130])
+        dates = next(f for f in qa_future["findings"] if f["rule"] == "dcma_09_invalid_dates")
+        check("and the progress checks report as not evaluated",
+              dates.get("evaluated") is False, dates["summary"][:110])
+
         # -------------------------------------------------- real binary .mpp round trip
         print("\n== native .mpp round trip ==")
 

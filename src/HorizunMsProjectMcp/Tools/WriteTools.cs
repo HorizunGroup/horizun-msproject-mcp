@@ -1061,6 +1061,10 @@ public static class WriteTools
         int baseline = 0,
         [Description("Status date for set_status_date and reschedule_incomplete, yyyy-MM-dd.")]
         string? statusDate = null,
+        [Description(
+            "Allow save_baseline to replace a baseline that already holds data. Off by default: "
+            + "overwriting one destroys the original plan every variance is measured against.")]
+        bool overwriteBaseline = false,
         [Description("Simulate against a copy and report the impact without committing.")] bool dryRun = false)
     {
         var session = SessionStore.GetForWrite(handle);
@@ -1087,6 +1091,24 @@ public static class WriteTools
                 {
                     var current = new PendingOp { Label = "save_baseline" };
                     pending.Add(current);
+
+                    // Overwriting a baseline destroys the record of the original plan — the thing
+                    // every variance and every earned-value figure is measured against, and which
+                    // cannot be reconstructed from the file afterwards. Never do it by accident.
+                    var existing = project.Tasks.Count(t => baseline == 0
+                        ? t.BaselineFinish is not null
+                        : SafeBaselineFinish(t, baseline) is not null);
+
+                    if (existing > 0 && !overwriteBaseline)
+                    {
+                        throw new McpToolException(
+                            $"Baseline {baseline} already holds dates for {existing} task(s). Saving over it " +
+                            "would destroy the record of the original plan — every variance and earned-value " +
+                            "figure is measured against it, and it cannot be recovered from the file " +
+                            "afterwards. Save to an empty slot (project_info lists which are in use), or pass " +
+                            "overwriteBaseline=true if replacing it is genuinely what you want.");
+                    }
+
                     foreach (var task in project.Tasks)
                     {
                         if (baseline == 0)
