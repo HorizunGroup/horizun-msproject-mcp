@@ -195,13 +195,19 @@ any schedule this server authored.
 
 ## Wiring it to a client
 
+Claude Desktop, Claude Code, Cursor, VS Code — anything that speaks MCP over stdio:
+
 ```jsonc
 {
   "mcpServers": {
-    "horizun-project": { "command": "horizun-msproject-mcp" }
+    "horizun-msproject": {
+      "command": "horizun-msproject-mcp"
+    }
   }
 }
 ```
+
+Registry name: `io.github.horizungroup/horizun-msproject-mcp` (see [`server.json`](server.json)).
 
 Call `project_health` first in every session — it tells you which backend you are on and what it
 can do.

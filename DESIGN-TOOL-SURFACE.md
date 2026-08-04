@@ -279,7 +279,8 @@ Flujo **plan → apply**: lee el xlsx/csv, lo empareja contra el cronograma, dev
 Nunca importa a ciegas.
 
 ### `bim_link` *(fase 2)*
-Mapea tareas ↔ elementos del modelo por código (`HRZ_COD_PRES` / PRODESA CLASS).
+Mapea tareas ↔ elementos del modelo por el código que ambos comparten — el de presupuesto, un
+keynote, o el estándar de clasificación que use la organización.
 `op: suggest|get|set|clear`. `suggest` propone el emparejamiento con % de confianza y deja los dudosos
 en una lista de revisión — mismo patrón que ya usamos para codificar keynotes.
 
