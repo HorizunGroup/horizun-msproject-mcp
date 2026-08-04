@@ -99,6 +99,13 @@ draft reports how many trades it left with nothing scheduled before them.
 CSV, JSON, MSPDI, Primavera XER and PMXML, native `.mpp`, and a shaped Power BI dataset. Imports
 plan before they write.
 
+### What it costs to have loaded
+
+The 25 tools present about **8,400 tokens** of schema, in every prompt, for as long as the server is
+connected. That is the honest price of the surface and it is worth knowing before choosing to carry
+it. It is also why the surface stayed at 25: the largest alternative ships 79 tools, and past a
+point an agent cannot hold the surface in its head well enough to choose correctly within it.
+
 ---
 
 ## The two contracts

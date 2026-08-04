@@ -118,12 +118,16 @@ public sealed record CalendarOp
 [McpServerToolType]
 public static class WriteTools
 {
+    /// <summary>Stated in full on tasks_write; the other write tools point at it.</summary>
     private const string VerifiedContract =
         "Every change is re-read from the model after the write and only then counted as applied; "
         + "anything the schedule refused comes back under 'rejected' with the reason and what the value "
         + "actually became. Pass dryRun=true to run the whole batch against a throwaway copy and see the "
         + "impact — how many tasks move, how far the finish date shifts, whether the critical path changes "
         + "— without touching the open document.";
+
+    private const string SameContract =
+        "Verified and dry-runnable exactly as tasks_write describes.";
 
     [McpServerTool(Name = "tasks_write")]
     [Description(
@@ -526,7 +530,7 @@ public static class WriteTools
     [McpServerTool(Name = "links_write")]
     [Description(
         "Add, remove, and change dependencies in one batch. Cycles are detected and refused before "
-        + "anything is applied, with the offending chain named in the rejection. " + VerifiedContract)]
+        + "anything is applied, with the offending chain named in the rejection. " + SameContract)]
     public static WriteResult LinksWrite(
         [Description("Document handle from project_open.")] string handle,
         [Description("The dependency operations to apply.")] LinkOp[] ops,
@@ -716,7 +720,7 @@ public static class WriteTools
     [McpServerTool(Name = "resources_write")]
     [Description(
         "Create, update, and delete resources, and assign or unassign them to tasks, in one batch. "
-        + VerifiedContract)]
+        + SameContract)]
     public static WriteResult ResourcesWrite(
         [Description("Document handle from project_open.")] string handle,
         [Description("The resource operations to apply.")] ResourceOp[] ops,
@@ -899,7 +903,7 @@ public static class WriteTools
     [Description(
         "Manage working calendars: create and delete them, and add non-working exceptions for "
         + "holidays, site shutdowns or a rainy season. The weekly working-hours pattern itself is not "
-        + "editable here. " + VerifiedContract)]
+        + "editable here. " + SameContract)]
     public static WriteResult CalendarsWrite(
         [Description("Document handle from project_open.")] string handle,
         [Description("The calendar operations to apply.")] CalendarOp[] ops,
