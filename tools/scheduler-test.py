@@ -254,6 +254,62 @@ def main() -> int:
               "__error__" in recalc or recalc.get("applied") == 0,
               json.dumps(recalc)[:120])
 
+        # ------------------------------------------------------- hierarchy and WBS
+        print("\n== hierarchy ==")
+
+        handle, _ = build(client, workdir, "wbs", [{"name": "FASE 1", "duration": "0"}], [])
+        parent = client.call("tasks_query", handle=handle)["items"][0]["uid"]
+        client.call("tasks_write", handle=handle, ops=[
+            {"op": "create", "name": "Hijo A", "duration": "5d", "parentUid": parent},
+            {"op": "create", "name": "Hijo B", "duration": "3d", "parentUid": parent}])
+        t = {x["name"]: x for x in client.call("tasks_query", handle=handle, limit=20)["items"]}
+        check("a parent becomes a summary task", t["FASE 1"]["summary"] is True)
+        check("children are numbered under it in the WBS",
+              t["Hijo A"]["wbs"] == "1.1" and t["Hijo B"]["wbs"] == "1.2",
+              f"{t['Hijo A']['wbs']} / {t['Hijo B']['wbs']}")
+        check("the summary spans its children",
+              d(t["FASE 1"]["finish"]) == max(d(t["Hijo A"]["finish"]), d(t["Hijo B"]["finish"])),
+              f"summary ends {t['FASE 1']['finish'][:10]}")
+
+        client.call("project_save", handle=handle, op="save")
+        again = client.call("project_open", path=str(workdir / "wbs.xml"), mode="readonly")
+        rt = {x["name"]: x for x in client.call("tasks_query", handle=again["handle"], limit=20)["items"]}
+        check("the hierarchy survives a save and reopen",
+              rt["Hijo A"].get("parentUid") == parent and rt["FASE 1"]["summary"] is True,
+              f"parent={rt['Hijo A'].get('parentUid')}")
+
+        # ---------------------------------------------------------- Primavera formats
+        print("\n== Primavera round trip ==")
+
+        handle, _ = build(client, workdir, "pv", [
+            {"name": "Excavacion", "duration": "8d"}, {"name": "Cimentacion", "duration": "12d"},
+        ], [{"op": "link", "from": "Excavacion", "to": "Cimentacion", "type": "FS"}])
+
+        for fmt, ext in (("xer", ".xer"), ("pmxml", ".pmxml.xml")):
+            out = workdir / f"pv{ext}"
+            client.call("project_save", handle=handle, op="save_as", path=str(out), format=fmt)
+            back = client.call("project_open", path=str(out), mode="readonly")
+            rows = client.call("tasks_query", handle=back["handle"], limit=20)["items"]
+            links = client.call("links_query", handle=back["handle"])["total"]
+            check(f"{fmt} round trip keeps the tasks and the logic",
+                  len(rows) >= 2 and links >= 1,
+                  f"{len(rows)} tasks, {links} links, {out.stat().st_size} bytes")
+
+        # --------------------------------------------------------- unlink and relink
+        print("\n== removing logic ==")
+
+        handle, _ = build(client, workdir, "unlink", [
+            {"name": "A", "duration": "3d"}, {"name": "B", "duration": "3d"},
+        ], [{"op": "link", "from": "A", "to": "B", "type": "FS"}])
+        uid = {x["name"]: x["uid"] for x in client.call("tasks_query", handle=handle)["items"]}
+        before_links = client.call("links_query", handle=handle)["total"]
+        removed = client.call("links_write", handle=handle, ops=[
+            {"op": "unlink", "from": uid["A"], "to": uid["B"]}])
+        after_links = client.call("links_query", handle=handle)["total"]
+        check("unlink actually removes the dependency",
+              removed["applied"] == 1 and after_links == before_links - 1,
+              f"{before_links} -> {after_links}, rejected={json.dumps(removed['rejected'])[:80]}")
+
         # -------------------------------------------------- real binary .mpp round trip
         print("\n== native .mpp round trip ==")
 

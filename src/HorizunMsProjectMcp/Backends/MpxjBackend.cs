@@ -61,8 +61,12 @@ public static class MpxjBackend
             "mspdi" or "xml" => new MSPDIWriter(),
             "mpx" => new MPXWriter(),
             "json" => new JsonWriter(),
+            "xer" => new PrimaveraXERFileWriter(),
+            "pmxml" => new PrimaveraPMFileWriter(),
+            "planner" => new PlannerWriter(),
+            "sdef" => new SDEFWriter(),
             _ => throw new McpToolException(
-                $"Unknown output format '{format}'. Use mspdi, mpx, json, or mpp."),
+                $"Unknown output format '{format}'. Use mspdi, mpx, json, mpp, xer, pmxml, planner, or sdef."),
         };
 
         try

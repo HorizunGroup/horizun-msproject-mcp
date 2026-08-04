@@ -137,11 +137,11 @@ can do.
 ```bash
 cd src/HorizunMsProjectMcp && dotnet build && cd ../..
 python tools/acceptance-test.py   # 57 checks, all 20 tools end to end
-python tools/scheduler-test.py    # 22 checks, critical-path engine correctness
+python tools/scheduler-test.py    # 29 checks, critical-path engine correctness
 python tools/smoke-test.py        # 13 checks, environment and capabilities
 ```
 
-**92 checks**, driven over real JSON-RPC against the running server.
+**99 checks**, driven over real JSON-RPC against the running server.
 
 The acceptance suite builds a construction schedule from nothing and asserts the contracts above:
 that a dry run commits nothing, that a cycle is refused before it is applied, that a write to an
@@ -151,7 +151,8 @@ date by exactly the delay injected into it.
 The scheduler suite is the one that earns trust in the dates. It covers start-to-start,
 finish-to-finish and start-to-finish logic, positive and negative lag, hard and soft constraints,
 deadlines producing negative float, calendar exceptions actually pushing the schedule out, and a
-full round trip through a real binary `.mpp` — written by Microsoft Project, read back by MPXJ,
+WBS hierarchy with summary rollup, and full round trips through Primavera XER and PMXML and
+through a real binary `.mpp` — the last written by Microsoft Project itself, read back by MPXJ,
 with dates, milestone flags, budget codes and dependencies all intact.
 
 Rebuild the installable package with `dotnet pack -c Release`.
@@ -163,8 +164,9 @@ Rebuild the installable package with `dotnet pack -c Release`.
 **Reads** `.mpp` `.mpt` `.mpx` MSPDI `.xml` · Primavera `.xer` `.pmxml` · Asta `.pp` · Planner ·
 GanttProject and more, through [MPXJ](https://www.mpxj.org/).
 
-**Writes** MSPDI `.xml` (Microsoft Project opens it natively) · `.mpx` · JSON · CSV · Power BI
-dataset · native `.mpp` where Microsoft Project is installed.
+**Writes** MSPDI `.xml` (Microsoft Project opens it natively) · `.mpx` · Primavera `.xer` and
+`.pmxml` · Planner · SDEF · JSON · CSV · Power BI dataset · native `.mpp` where Microsoft Project
+is installed.
 
 ## Layout
 
@@ -178,7 +180,7 @@ src/HorizunMsProjectMcp/
   Tools/         the 20 MCP tools
 tools/
   acceptance-test.py   end-to-end across all 20 tools, 57 checks
-  scheduler-test.py    critical-path engine correctness + .mpp round trip, 22 checks
+  scheduler-test.py    critical-path engine correctness + format round trips, 29 checks
   smoke-test.py        environment and capability matrix, 13 checks
 ```
 
