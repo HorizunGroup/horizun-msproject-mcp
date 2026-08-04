@@ -19,8 +19,13 @@ public sealed class WorkingCalendar
     public const int FinishHour = 17;
 
     public WorkingCalendar(ProjectFile project)
+        : this(ResolveDefault(project))
     {
-        _calendar = project.DefaultCalendar ?? project.Calendars.FirstOrDefault();
+    }
+
+    public WorkingCalendar(ProjectCalendar? calendar)
+    {
+        _calendar = calendar;
 
         if (_calendar is null)
         {
@@ -58,6 +63,66 @@ public sealed class WorkingCalendar
         {
             // A calendar we cannot read degrades to the weekday fallback rather than failing.
         }
+    }
+
+    /// <summary>Name of the calendar actually in use, for diagnostics.</summary>
+    public string? Name => _calendar?.Name;
+
+    /// <summary>
+    /// Hours in a working day according to this calendar. Durations are stored in minutes or
+    /// hours and have to be turned into days somehow; assuming eight is wrong on any site
+    /// running longer shifts, and the error compounds along a chain.
+    /// </summary>
+    public double HoursPerDay => _hoursPerDay ??= ComputeHoursPerDay();
+
+    private double? _hoursPerDay;
+
+    private double ComputeHoursPerDay()
+    {
+        {
+            if (_calendar is null)
+            {
+                return 8.0;
+            }
+
+            foreach (var day in Enum.GetValues<DayOfWeek>())
+            {
+                try
+                {
+                    if (!_calendar.IsWorkingDay(day))
+                    {
+                        continue;
+                    }
+
+                    var work = _calendar.GetWork(day, TimeUnit.Hours);
+                    if (work is not null && work.DurationValue > 0)
+                    {
+                        return work.DurationValue;
+                    }
+                }
+                catch
+                {
+                    // Fall through to the default.
+                }
+            }
+
+            return 8.0;
+        }
+    }
+
+    /// <summary>Which weekdays this calendar treats as working.</summary>
+    public IReadOnlyList<string> WorkingDaysOfWeek()
+    {
+        // Probe a real week rather than reading the day-type table, so exceptions and any
+        // quirk of how the file stores its pattern are reflected in the answer.
+        var monday = DateTime.Today;
+        while (monday.DayOfWeek != DayOfWeek.Monday) monday = monday.AddDays(1);
+
+        return Enumerable.Range(0, 7)
+            .Select(i => monday.AddDays(i))
+            .Where(IsWorking)
+            .Select(d => d.DayOfWeek.ToString())
+            .ToList();
     }
 
     public bool IsWorking(DateTime date)
@@ -197,4 +262,65 @@ public sealed class WorkingCalendar
 
     public static DateTime AtFinish(DateTime day) =>
         new(day.Year, day.Month, day.Day, FinishHour, 0, 0);
+
+    /// <summary>
+    /// The calendar the project actually runs on. Files often carry a "Standard" calendar they do
+    /// not use alongside the real one, so where no default is flagged, pick the calendar the tasks
+    /// themselves reference most rather than whichever happens to be first.
+    /// </summary>
+    private static ProjectCalendar? ResolveDefault(ProjectFile project)
+    {
+        if (project.DefaultCalendar is { } declared)
+        {
+            return declared;
+        }
+
+        var mostUsed = project.Tasks
+            .Select(t => t.Calendar)
+            .Where(c => c is not null)
+            .GroupBy(c => c!.UniqueID)
+            .OrderByDescending(g => g.Count())
+            .FirstOrDefault()?.First();
+
+        return mostUsed ?? project.Calendars.FirstOrDefault();
+    }
+}
+
+/// <summary>
+/// Hands out the right working calendar for each task and caches it.
+/// </summary>
+/// <remarks>
+/// Real construction schedules mix calendars — a six-day site week, a night shift, a 24-hour
+/// calendar for curing — and a task carrying its own calendar is the normal case, not the
+/// exception. Scheduling everything against one calendar was measurably wrong: on a six-day
+/// schedule it moved more than half the tasks by a week or more.
+/// </remarks>
+public sealed class CalendarSet
+{
+    private readonly Dictionary<int, WorkingCalendar> _byCalendarUid = new();
+    private readonly WorkingCalendar _default;
+
+    public CalendarSet(ProjectFile project)
+    {
+        _default = new WorkingCalendar(project);
+    }
+
+    public WorkingCalendar Default => _default;
+
+    public WorkingCalendar For(MPXJ.Net.Task task)
+    {
+        var calendar = task.Calendar;
+        if (calendar?.UniqueID is not { } uid)
+        {
+            return _default;
+        }
+
+        if (!_byCalendarUid.TryGetValue(uid, out var working))
+        {
+            working = new WorkingCalendar(calendar);
+            _byCalendarUid[uid] = working;
+        }
+
+        return working;
+    }
 }

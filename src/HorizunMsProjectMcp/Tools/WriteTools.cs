@@ -1114,6 +1114,23 @@ public static class WriteTools
                     var current = new PendingOp { Label = "recalculate" };
                     pending.Add(current);
 
+                    // Asking for a recalculation is the authorisation. From here on this document
+                    // is scheduled by our engine, so later writes may reschedule it too.
+                    if (!session.MayReschedule)
+                    {
+                        session.RescheduleAuthorised = true;
+                        rejected.Add(new RejectedWrite
+                        {
+                            Field = "recalculate",
+                            Reason = "This schedule was imported, so its dates were Microsoft Project's. "
+                                     + "They have now been replaced by this server's critical-path engine, "
+                                     + "which does not reproduce Microsoft Project exactly on schedules "
+                                     + "that use resource-driven dates, task types or manual scheduling — "
+                                     + "measured on real files, most tasks can move. Close without saving "
+                                     + "if that was not what you wanted.",
+                        });
+                    }
+
                     var report = Analysis.CpmScheduler.Run(project);
                     current.Checks.Add(file =>
                         file.Tasks.Any(t => !t.Summary && t.Start is not null)

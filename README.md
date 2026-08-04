@@ -109,13 +109,40 @@ Everything else — scheduling, recalculation, dry-run simulation, rescheduling 
 DCMA Critical Path Test — is served by this server's own critical-path engine and works on both
 backends.
 
-## The critical-path engine
+## The critical-path engine — and what it is not
 
 MPXJ reads and writes schedule files but does not *schedule* them: a task created through it has no
 dates at all. So there is a real CPM engine here — forward pass, backward pass, total and free
 float, critical flags — honouring relationship types, lag, constraints, deadlines, actual dates, and
-the working calendar (including exceptions you add with `calendars_write`). Without it, dates,
-float, earned value and every impact figure would be empty on any schedule this server authored.
+the working calendar per task (six-day site weeks, night shifts, exceptions you add with
+`calendars_write`). Without it, dates, float, earned value and every impact figure would be empty on
+any schedule this server authored.
+
+> ### ⚠️ It is not Microsoft Project's scheduler
+>
+> **This engine reproduces Microsoft Project exactly on schedules built through this server. It does
+> not reproduce it on real imported schedules.** Measured against four production construction
+> files, recalculating reproduced Microsoft Project's own start dates on 100% of tasks in one
+> schedule, 69% in another, and around 23% in two more — where most of the remainder moved by a week
+> or more.
+>
+> Microsoft Project's scheduler has behaviours this engine does not implement: task types
+> (fixed units, duration or work), effort-driven scheduling, resource calendars driving dates,
+> manually scheduled tasks, split tasks, and elapsed durations. On a schedule that uses them, our
+> dates will differ.
+>
+> **So imported schedules are never silently rescheduled.** Open a `.mpp` and its dates stay exactly
+> as Microsoft Project computed them; a write reports what it changed and says plainly that dates
+> were not recalculated. If you want this engine's dates instead, ask for them explicitly with
+> `schedule_update op='recalculate'` — which warns you first, and after which the document is ours
+> rather than Project's.
+>
+> Reading, querying, analysis, DCMA-14 and earned value all run on Microsoft Project's own dates and
+> are unaffected. A dry run measures its impact against this engine on both sides, so the movement
+> it reports is caused by your change rather than by the two engines disagreeing.
+>
+> If Microsoft Project is installed, `project_health` reports the COM backend and you can hand the
+> file back to Project itself for a native save.
 
 ---
 
@@ -137,11 +164,11 @@ can do.
 ```bash
 cd src/HorizunMsProjectMcp && dotnet build && cd ../..
 python tools/acceptance-test.py   # 57 checks, all 20 tools end to end
-python tools/scheduler-test.py    # 29 checks, critical-path engine correctness
+python tools/scheduler-test.py    # 34 checks, critical-path engine correctness
 python tools/smoke-test.py        # 13 checks, environment and capabilities
 ```
 
-**99 checks**, driven over real JSON-RPC against the running server.
+**104 checks**, driven over real JSON-RPC against the running server.
 
 The acceptance suite builds a construction schedule from nothing and asserts the contracts above:
 that a dry run commits nothing, that a cycle is refused before it is applied, that a write to an
@@ -151,9 +178,13 @@ date by exactly the delay injected into it.
 The scheduler suite is the one that earns trust in the dates. It covers start-to-start,
 finish-to-finish and start-to-finish logic, positive and negative lag, hard and soft constraints,
 deadlines producing negative float, calendar exceptions actually pushing the schedule out, and a
-WBS hierarchy with summary rollup, and full round trips through Primavera XER and PMXML and
-through a real binary `.mpp` — the last written by Microsoft Project itself, read back by MPXJ,
-with dates, milestone flags, budget codes and dependencies all intact.
+WBS hierarchy with summary rollup, that an imported schedule is never silently rescheduled, and
+full round trips through Primavera XER and PMXML and through a real binary `.mpp` — the last
+written by Microsoft Project itself, read back by MPXJ, with dates, milestone flags, budget codes
+and dependencies all intact.
+
+Beyond the suites, the server has been run against production construction schedules of up to
+7,000 tasks and 170 MB.
 
 Rebuild the installable package with `dotnet pack -c Release`.
 
@@ -180,7 +211,7 @@ src/HorizunMsProjectMcp/
   Tools/         the 20 MCP tools
 tools/
   acceptance-test.py   end-to-end across all 20 tools, 57 checks
-  scheduler-test.py    critical-path engine correctness + format round trips, 29 checks
+  scheduler-test.py    critical-path engine correctness + format round trips, 34 checks
   smoke-test.py        environment and capability matrix, 13 checks
 ```
 

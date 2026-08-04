@@ -6,6 +6,8 @@ namespace Horizun.ProjectMcp.Backends;
 /// <summary>Translates between MPXJ's object model and the DTOs the tools expose.</summary>
 public static class MpxjMapper
 {
+    /// <summary>Fallback only. Prefer the effective calendar's own figure — real sites run
+    /// 8, 9, 9.5 or 10 hour days, and guessing compounds along every chain.</summary>
     public const double HoursPerDay = 8.0;
 
     public static string? Iso(DateTime? value) => value?.ToString("yyyy-MM-ddTHH:mm:ss");
@@ -14,19 +16,20 @@ public static class MpxjMapper
     /// Duration in days. MPXJ carries a value plus its unit; everything downstream
     /// (float thresholds, DCMA limits, impact deltas) reasons in days, so normalise once here.
     /// </summary>
-    public static double? Days(MPXJ.Net.Duration? duration)
+    public static double? Days(MPXJ.Net.Duration? duration, double? hoursPerDay = null)
     {
         if (duration is null)
         {
             return null;
         }
 
+        var hours = hoursPerDay is > 0 ? hoursPerDay.Value : HoursPerDay;
         var amount = duration.DurationValue;
         return duration.Units switch
         {
-            TimeUnit.Minutes => amount / 60.0 / HoursPerDay,
+            TimeUnit.Minutes => amount / 60.0 / hours,
             TimeUnit.ElapsedMinutes => amount / 60.0 / 24.0,
-            TimeUnit.Hours => amount / HoursPerDay,
+            TimeUnit.Hours => amount / hours,
             TimeUnit.ElapsedHours => amount / 24.0,
             TimeUnit.Days => amount,
             TimeUnit.ElapsedDays => amount,
@@ -40,15 +43,15 @@ public static class MpxjMapper
         };
     }
 
-    public static double? Hours(MPXJ.Net.Duration? duration)
+    public static double? Hours(MPXJ.Net.Duration? duration, double? hoursPerDay = null)
     {
-        var days = Days(duration);
-        return days is null ? null : days * HoursPerDay;
+        var days = Days(duration, hoursPerDay);
+        return days is null ? null : days * (hoursPerDay is > 0 ? hoursPerDay.Value : HoursPerDay);
     }
 
-    public static string? DurationText(MPXJ.Net.Duration? duration)
+    public static string? DurationText(MPXJ.Net.Duration? duration, double? hoursPerDay = null)
     {
-        var days = Days(duration);
+        var days = Days(duration, hoursPerDay);
         return days is null ? null : $"{days:0.##}d";
     }
 

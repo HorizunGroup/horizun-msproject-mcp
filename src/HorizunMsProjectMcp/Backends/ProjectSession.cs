@@ -16,6 +16,23 @@ public sealed class ProjectSession
     public required bool ReadOnly { get; init; }
     public required string Fingerprint { get; set; }
     public bool Dirty { get; set; }
+
+    /// <summary>
+    /// True when this schedule was created through this server rather than imported.
+    /// </summary>
+    /// <remarks>
+    /// This is the gate on automatic rescheduling. Our critical-path engine reproduces Microsoft
+    /// Project exactly on schedules we authored, and measurably does not on real imported ones —
+    /// on a client file it can move half the tasks by a week or more. So imported schedules are
+    /// never silently rescheduled: their dates stay as Microsoft Project left them, and the caller
+    /// asks for a recalculation explicitly if they want ours.
+    /// </remarks>
+    public bool Authored { get; init; }
+
+    /// <summary>Set once the caller has explicitly asked for our engine on this document.</summary>
+    public bool RescheduleAuthorised { get; set; }
+
+    public bool MayReschedule => Authored || RescheduleAuthorised;
     public DateTime OpenedAt { get; } = DateTime.UtcNow;
 
     /// <summary>
@@ -43,7 +60,7 @@ public static class SessionStore
     private static readonly ConcurrentDictionary<string, ProjectSession> Sessions = new();
     private static int _counter;
 
-    public static ProjectSession Add(string path, ProjectFile file, bool readOnly)
+    public static ProjectSession Add(string path, ProjectFile file, bool readOnly, bool authored = false)
     {
         var handle = $"d{Interlocked.Increment(ref _counter)}";
         var session = new ProjectSession
@@ -53,6 +70,7 @@ public static class SessionStore
             File = file,
             ReadOnly = readOnly,
             Fingerprint = ProjectSession.ComputeFingerprint(path, file),
+            Authored = authored,
         };
         Sessions[handle] = session;
         return session;

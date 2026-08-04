@@ -310,6 +310,44 @@ def main() -> int:
               removed["applied"] == 1 and after_links == before_links - 1,
               f"{before_links} -> {after_links}, rejected={json.dumps(removed['rejected'])[:80]}")
 
+        # ------------------------------------- imported schedules are not rescheduled
+        print("\n== imported schedules keep their dates ==")
+
+        handle, _ = build(client, workdir, "imported", [
+            {"name": "A", "duration": "5d"}, {"name": "B", "duration": "5d"},
+        ], [{"op": "link", "from": "A", "to": "B", "type": "FS"}])
+        client.call("project_save", handle=handle, op="save")
+        client.call("project_save", handle=handle, op="close")
+
+        # Reopening makes it an import as far as the server is concerned.
+        reopened = client.call("project_open", path=str(workdir / "imported.xml"))["handle"]
+        check("an imported schedule says its dates are Microsoft Project's",
+              any("imported" in n.lower() for n in
+                  client.call("project_open", path=str(workdir / "imported.xml"),
+                              mode="readonly").get("notes", [])))
+
+        t0 = {x["name"]: x["start"] for x in client.call("tasks_query", handle=reopened)["items"]}
+        w = client.call("tasks_write", handle=reopened, ops=[
+            {"op": "update", "uid": next(x["uid"] for x in
+                                         client.call("tasks_query", handle=reopened)["items"]
+                                         if x["name"] == "A"), "duration": "40d"}])
+        t1 = {x["name"]: x["start"] for x in client.call("tasks_query", handle=reopened)["items"]}
+        check("a write does not silently reschedule an imported schedule",
+              t0["B"] == t1["B"], f"B {t0['B'][:10]} -> {t1['B'][:10]}")
+        check("and it says so plainly",
+              any("not recalculated" in n.lower() for n in w.get("notes", [])),
+              json.dumps(w.get("notes"))[:140])
+
+        rec = client.call("schedule_update", handle=reopened, op="recalculate")
+        check("asking for a recalculation warns before replacing those dates",
+              any("microsoft project" in r["reason"].lower() for r in rec.get("rejected", [])),
+              json.dumps(rec.get("rejected"))[:140])
+        t2 = {x["name"]: x["start"] for x in client.call("tasks_query", handle=reopened)["items"]}
+        check("once authorised, the engine does move the schedule",
+              t2["B"] != t1["B"], f"B {t1['B'][:10]} -> {t2['B'][:10]}")
+
+        client.call("project_save", handle=reopened, op="close", discardChanges=True)
+
         # -------------------------------------------------- real binary .mpp round trip
         print("\n== native .mpp round trip ==")
 

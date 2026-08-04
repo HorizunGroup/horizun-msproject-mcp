@@ -85,6 +85,15 @@ public static class WriteEngine
         Func<ProjectFile, List<RejectedWrite>, List<PendingOp>> apply)
     {
         var target = dryRun ? MpxjBackend.Clone(session.File) : session.File;
+
+        // On a dry run the copy is disposable, so bring it onto our engine's own baseline first.
+        // Otherwise the diff would be dominated by our engine disagreeing with Microsoft Project's
+        // stored dates rather than by the change being simulated.
+        if (dryRun && !session.MayReschedule)
+        {
+            Analysis.CpmScheduler.Run(target);
+        }
+
         var before = Snapshot.Capture(target);
 
         var rejected = new List<RejectedWrite>();
@@ -128,11 +137,14 @@ public static class WriteEngine
             }
         }
 
-        // Reschedule before measuring. Without this the impact report would only ever show the
-        // fields that were touched, never the downstream movement that is the whole reason to ask.
-        if (applied > 0)
+        // Reschedule before measuring, so the impact shows the downstream movement rather than
+        // only the fields that were touched. On an imported schedule the live document is left
+        // exactly as Microsoft Project computed it — see ProjectSession.Authored.
+        var rescheduled = false;
+        if (applied > 0 && (dryRun || session.MayReschedule))
         {
             Analysis.CpmScheduler.Run(target);
+            rescheduled = true;
         }
 
         var after = Snapshot.Capture(target);
@@ -149,14 +161,38 @@ public static class WriteEngine
             FieldsVerified = fieldsVerified,
             Rejected = rejected,
             Impact = MeasureImpact(before, after),
-            Notes = dryRun
-                ? new[]
-                {
-                    "Dry run: applied to a throwaway copy of the schedule, measured, and discarded. "
-                    + "Nothing was written to the open document.",
-                }
-                : Array.Empty<string>(),
+            Notes = BuildNotes(dryRun, rescheduled, applied, session),
         };
+    }
+
+    private static string[] BuildNotes(bool dryRun, bool rescheduled, int applied, ProjectSession session)
+    {
+        var notes = new List<string>();
+
+        if (dryRun)
+        {
+            notes.Add(
+                "Dry run: applied to a throwaway copy of the schedule, measured, and discarded. "
+                + "Nothing was written to the open document.");
+
+            if (!session.MayReschedule)
+            {
+                notes.Add(
+                    "The impact is measured against this server's own critical-path engine on both "
+                    + "sides, so the movement shown is caused by your change. The absolute dates it "
+                    + "would produce differ from Microsoft Project's on an imported schedule.");
+            }
+        }
+        else if (applied > 0 && !rescheduled)
+        {
+            notes.Add(
+                "Dates were not recalculated. This is an imported schedule, so its dates remain the "
+                + "ones Microsoft Project computed; Project will reschedule when it next opens the "
+                + "file. Only the fields written are reflected here. Call schedule_update with "
+                + "op='recalculate' to use this server's engine instead.");
+        }
+
+        return notes.ToArray();
     }
 
     private static ImpactReport MeasureImpact(Snapshot before, Snapshot after)

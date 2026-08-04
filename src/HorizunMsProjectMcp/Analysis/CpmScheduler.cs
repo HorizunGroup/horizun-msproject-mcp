@@ -41,7 +41,8 @@ public static class CpmScheduler
 
     public static ScheduleRunReport Run(ProjectFile project)
     {
-        var calendar = new WorkingCalendar(project);
+        var calendars = new CalendarSet(project);
+        var calendar = calendars.Default;
         var warnings = new List<string>();
 
         var leaves = project.Tasks
@@ -71,7 +72,8 @@ public static class CpmScheduler
             {
                 Task = t,
                 Uid = t.UniqueID!.Value,
-                DurationDays = Math.Max(MpxjMapper.Days(t.Duration) ?? 0, 0),
+                DurationDays = Math.Max(
+                    MpxjMapper.Days(t.Duration, calendars.For(t).HoursPerDay) ?? 0, 0),
                 EarlyStart = projectStart,
                 EarlyFinish = projectStart,
             });
@@ -83,11 +85,22 @@ public static class CpmScheduler
         {
             var node = nodes[uid];
             var task = node.Task;
+            var cal = calendars.For(task);
 
             // Work that has actually started is anchored to reality, not to the logic.
+            // A task that nothing drives keeps the date it already has: real schedules are full of
+            // tasks positioned by hand, and pulling them all to the project start rewrites the
+            // planner's intent rather than recalculating it. Measured on real files, honouring this
+            // is the difference between matching Microsoft Project and moving most of the schedule
+            // by a month. Only tasks the logic actually drives get moved.
+            var driven = task.Predecessors.Any(r =>
+                r.PredecessorTask?.UniqueID is { } pid && nodes.ContainsKey(pid));
+
             var earliest = task.ActualStart is not null
-                ? calendar.NextWorkingDay(task.ActualStart.Value)
-                : projectStart;
+                ? cal.NextWorkingDay(task.ActualStart.Value)
+                : !driven && task.Start is not null
+                    ? cal.NextWorkingDay(task.Start.Value)
+                    : projectStart;
 
             foreach (var relation in task.Predecessors)
             {
@@ -97,22 +110,22 @@ public static class CpmScheduler
                     continue;
                 }
 
-                var lag = MpxjMapper.Days(relation.Lag) ?? 0;
+                var lag = MpxjMapper.Days(relation.Lag, cal.HoursPerDay) ?? 0;
                 var candidate = relation.Type switch
                 {
                     RelationType.StartStart => pred.EarlyStart,
-                    RelationType.FinishFinish => calendar.SubtractWorkingDays(
+                    RelationType.FinishFinish => cal.SubtractWorkingDays(
                         pred.EarlyFinish, Math.Max(node.DurationDays, 1)),
-                    RelationType.StartFinish => calendar.SubtractWorkingDays(
+                    RelationType.StartFinish => cal.SubtractWorkingDays(
                         pred.EarlyStart, Math.Max(node.DurationDays, 1)),
                     _ => node.DurationDays <= 0
                         ? pred.EarlyFinish
-                        : calendar.NextWorkingDay(pred.EarlyFinish.AddDays(1)),
+                        : cal.NextWorkingDay(pred.EarlyFinish.AddDays(1)),
                 };
 
                 if (Math.Abs(lag) > 0.0001)
                 {
-                    candidate = calendar.Shift(candidate, lag);
+                    candidate = cal.Shift(candidate, lag);
                 }
 
                 if (candidate > earliest)
@@ -122,17 +135,17 @@ public static class CpmScheduler
             }
 
             // Constraints override the logic where they are harder than it.
-            (earliest, var pinned) = ApplyConstraint(task, earliest, node.DurationDays, calendar);
+            (earliest, var pinned) = ApplyConstraint(task, earliest, node.DurationDays, cal);
             node.Pinned = pinned;
 
-            node.EarlyStart = calendar.NextWorkingDay(earliest);
+            node.EarlyStart = cal.NextWorkingDay(earliest);
             node.EarlyFinish = node.DurationDays <= 0
                 ? node.EarlyStart
-                : calendar.AddWorkingDays(node.EarlyStart, node.DurationDays);
+                : cal.AddWorkingDays(node.EarlyStart, node.DurationDays);
 
             if (task.ActualFinish is not null)
             {
-                node.EarlyFinish = calendar.PreviousWorkingDay(task.ActualFinish.Value);
+                node.EarlyFinish = cal.PreviousWorkingDay(task.ActualFinish.Value);
             }
         }
 
@@ -151,6 +164,7 @@ public static class CpmScheduler
         {
             var node = nodes[uid];
             var task = node.Task;
+            var cal = calendars.For(task);
             var latest = backwardFrom;
 
             foreach (var relation in task.Successors)
@@ -161,21 +175,21 @@ public static class CpmScheduler
                     continue;
                 }
 
-                var lag = MpxjMapper.Days(relation.Lag) ?? 0;
+                var lag = MpxjMapper.Days(relation.Lag, cal.HoursPerDay) ?? 0;
                 var candidate = relation.Type switch
                 {
-                    RelationType.StartStart => calendar.AddWorkingDays(
+                    RelationType.StartStart => cal.AddWorkingDays(
                         succ.LateStart, Math.Max(node.DurationDays, 1)),
                     RelationType.FinishFinish => succ.LateFinish,
                     RelationType.StartFinish => succ.LateFinish,
                     _ => node.DurationDays <= 0
                         ? succ.LateStart
-                        : calendar.PreviousWorkingDay(succ.LateStart.AddDays(-1)),
+                        : cal.PreviousWorkingDay(succ.LateStart.AddDays(-1)),
                 };
 
                 if (Math.Abs(lag) > 0.0001)
                 {
-                    candidate = calendar.Shift(candidate, -lag);
+                    candidate = cal.Shift(candidate, -lag);
                 }
 
                 if (candidate < latest)
@@ -187,7 +201,7 @@ public static class CpmScheduler
             // A deadline is a soft target that still produces negative float when missed.
             if (task.Deadline is not null)
             {
-                var byDeadline = calendar.PreviousWorkingDay(task.Deadline.Value);
+                var byDeadline = cal.PreviousWorkingDay(task.Deadline.Value);
                 if (byDeadline < latest)
                 {
                     latest = byDeadline;
@@ -197,7 +211,7 @@ public static class CpmScheduler
             node.LateFinish = latest;
             node.LateStart = node.DurationDays <= 0
                 ? node.LateFinish
-                : calendar.SubtractWorkingDays(node.LateFinish, node.DurationDays);
+                : cal.SubtractWorkingDays(node.LateFinish, node.DurationDays);
         }
 
         // ---------------- write the results back ----------------
@@ -207,7 +221,8 @@ public static class CpmScheduler
         foreach (var node in nodes.Values)
         {
             var task = node.Task;
-            var totalFloat = calendar.WorkingDaysBetween(node.EarlyStart, node.LateStart);
+            var cal = calendars.For(task);
+            var totalFloat = cal.WorkingDaysBetween(node.EarlyStart, node.LateStart);
 
             task.Start = task.ActualStart ?? WorkingCalendar.AtStart(node.EarlyStart);
             task.Finish = task.ActualFinish ?? WorkingCalendar.AtFinish(node.EarlyFinish);
@@ -217,7 +232,7 @@ public static class CpmScheduler
             task.LateFinish = WorkingCalendar.AtFinish(node.LateFinish);
             task.TotalSlack = MPXJ.Net.Duration.GetInstance(totalFloat, TimeUnit.Days);
 
-            var freeFloat = FreeFloat(node, nodes, calendar);
+            var freeFloat = FreeFloat(node, nodes, cal);
             task.FreeSlack = MPXJ.Net.Duration.GetInstance(freeFloat, TimeUnit.Days);
 
             var isCritical = totalFloat <= 0.0001;

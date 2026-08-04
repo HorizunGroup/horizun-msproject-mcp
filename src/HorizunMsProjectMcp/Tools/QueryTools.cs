@@ -26,6 +26,18 @@ public sealed record ProjectInfo
     public required int Assignments { get; init; }
     public required int CriticalTasks { get; init; }
     public required IReadOnlyList<string> Calendars { get; init; }
+
+    /// <summary>The calendar the scheduling actually runs on.</summary>
+    public string? EffectiveCalendar { get; init; }
+
+    /// <summary>
+    /// Which days that calendar treats as working. Worth checking before trusting any date:
+    /// construction schedules commonly run a six-day week, and a mismatch here moves everything.
+    /// </summary>
+    public IReadOnlyList<string> WorkingDaysOfWeek { get; init; } = Array.Empty<string>();
+
+    /// <summary>Hours in a working day on that calendar — what a duration in days actually means here.</summary>
+    public double? HoursPerDay { get; init; }
     public required IReadOnlyList<int> BaselinesWithData { get; init; }
     public required IReadOnlyDictionary<string, string> CustomFieldAliases { get; init; }
     public required IReadOnlyDictionary<string, int> TasksByStatus { get; init; }
@@ -65,6 +77,7 @@ public static class QueryTools
         var project = session.File;
         var properties = project.ProjectProperties;
         var leaves = ScheduleAnalyzer.Leaves(project).ToList();
+        var effective = new WorkingCalendar(project);
 
         var baselines = new List<int>();
         if (project.Tasks.Any(t => t.BaselineFinish is not null))
@@ -122,6 +135,9 @@ public static class QueryTools
             Assignments = project.ResourceAssignments.Count,
             CriticalTasks = leaves.Count(t => t.Critical),
             Calendars = project.Calendars.Select(c => c.Name ?? "(unnamed)").ToList(),
+            EffectiveCalendar = effective.Name,
+            WorkingDaysOfWeek = effective.WorkingDaysOfWeek(),
+            HoursPerDay = effective.HoursPerDay,
             BaselinesWithData = baselines,
             CustomFieldAliases = aliases,
             TasksByStatus = byStatus,

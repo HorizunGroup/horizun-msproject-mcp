@@ -82,7 +82,7 @@ public static class SessionTools
             project = MpxjBackend.Read(full);
         }
 
-        var session = SessionStore.Add(full, project, readOnly);
+        var session = SessionStore.Add(full, project, readOnly, authored: create);
         if (create)
         {
             // Nothing is on disk yet, so the handle is dirty from birth — project_save must run
@@ -96,9 +96,18 @@ public static class SessionTools
             notes.Add(
                 "New empty schedule. Nothing has been written to disk yet — call project_save when you are ready.");
         }
-        else if (project.Tasks.Count == 0)
+        else
         {
-            notes.Add("The file opened but contains no tasks.");
+            if (project.Tasks.Count == 0)
+            {
+                notes.Add("The file opened but contains no tasks.");
+            }
+
+            notes.Add(
+                "Imported schedule: its dates are the ones Microsoft Project computed, and writes will "
+                + "not silently reschedule it. Microsoft Project recalculates when it next opens the file. "
+                + "To use this server's own critical-path engine instead, call schedule_update with "
+                + "op='recalculate' — read its warning first.");
         }
 
         if (!project.Tasks.Any(t => t.BaselineFinish is not null))
