@@ -83,3 +83,14 @@ is why nothing ships that has not passed everything first.
 The trust policy lives at [nuget.org/account/trustedpublishing](https://www.nuget.org/account/trustedpublishing)
 and is pinned to this repository and to this workflow file. Renaming `release.yml` breaks publishing
 until the policy is updated — deliberately, since the file name is part of what NuGet is trusting.
+
+### The MCP registry
+
+Listing in the registry runs separately, in `registry.yml`, and waits for NuGet to finish indexing
+before it starts. The registry proves ownership by fetching the published package and looking for
+`mcp-name: io.github.horizungroup/horizun-msproject-mcp` in its README — which is why that line
+lives in `README.md` and travels inside the package. Removing it silently breaks publishing to the
+registry while leaving NuGet unaffected.
+
+`server.json` must declare the same version as the package it points at; the workflow refuses
+otherwise, since a registry entry advertising a version nobody can install is worse than no entry.

@@ -5,6 +5,12 @@
 **An MCP server for Microsoft Project that needs neither Java nor Microsoft Project — and tells you
 the truth about what it wrote.**
 
+<!-- mcp-name: io.github.horizungroup/horizun-msproject-mcp -->
+<!-- The registry verifies ownership by finding that name in the published package's README.
+     It has to travel inside the NuGet package, which is why it lives here rather than in a
+     metadata file. -->
+
+
 Point any MCP client at a `.mpp`, a Primavera `.xer`, or an MSPDI `.xml` and ask real questions:
 where the critical path runs, which resources are overbooked, whether the schedule would survive a
 DCMA audit, what a two-week slip actually does to the finish date. Then write changes back — and

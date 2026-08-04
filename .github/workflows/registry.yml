@@ -1,0 +1,78 @@
+name: publish to mcp registry
+
+# Separate from the NuGet release on purpose. The registry verifies ownership by fetching the
+# published package and looking for `mcp-name:` in its README, so it cannot run until NuGet has
+# finished validating and indexing — minutes to an hour for a package this size. Chaining them
+# would fail on a race and look like a broken pipeline rather than a queue.
+#
+# Authenticated with GitHub OIDC, so there is no token to store: the registry trusts a
+# short-lived assertion that this repository produced the request, and the io.github.horizungroup
+# namespace is derived from the repository owner rather than claimed.
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['publish to nuget']
+    types: [completed]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the version out of server.json
+        id: server
+        run: |
+          version=$(jq -r '.version' server.json)
+          package=$(jq -r '.packages[0].version' server.json)
+          name=$(jq -r '.name' server.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          if [ "$version" != "$package" ]; then
+            echo "server.json declares version $version but points at package $package."
+            echo "They should match, or the registry advertises a version nobody can install."
+            exit 1
+          fi
+
+      # Ownership is proved by the package itself, so there is no point asking the registry
+      # until the package is actually fetchable.
+      - name: Wait for NuGet to finish indexing
+        run: |
+          for attempt in $(seq 1 40); do
+            if curl -sf "https://api.nuget.org/v3-flatcontainer/horizunmsprojectmcp/${{ steps.server.outputs.package }}/horizunmsprojectmcp.${{ steps.server.outputs.package }}.nupkg" -o /dev/null; then
+              echo "HorizunMsProjectMcp ${{ steps.server.outputs.package }} is live on NuGet."
+              exit 0
+            fi
+            echo "attempt $attempt: not indexed yet, waiting 30s"
+            sleep 30
+          done
+          echo "NuGet has not indexed ${{ steps.server.outputs.package }} after 20 minutes."
+          echo "Large packages can take longer; re-run this workflow once it appears at"
+          echo "https://www.nuget.org/packages/HorizunMsProjectMcp"
+          exit 1
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" \
+            | tar xz mcp-publisher
+          sudo mv mcp-publisher /usr/local/bin/
+          mcp-publisher --version
+
+      - name: Authenticate with the registry
+        run: mcp-publisher login github-oidc
+
+      - name: Publish
+        run: mcp-publisher publish
+
+      - name: Confirm it is listed
+        run: |
+          sleep 10
+          curl -sf "https://registry.modelcontextprotocol.io/v0/servers?search=${{ steps.server.outputs.name }}" \
+            | jq -r '.servers[]? | "\(.name) \(.version)"' || echo "Not visible yet; the registry may take a moment."
