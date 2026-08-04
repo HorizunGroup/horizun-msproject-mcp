@@ -69,13 +69,17 @@ would have.
 
 ## Releasing
 
-Publishing runs from a tag, so the NuGet key lives in a repository secret and is never pasted
-anywhere:
+Publishing runs from a tag and authenticates with NuGet Trusted Publishing, so there is no API key
+anywhere — not in a secret, not in a terminal, not in this repository. NuGet trusts a short-lived
+token GitHub mints for this repository and `release.yml` specifically.
 
 1. Set `<Version>` in `src/HorizunMsProjectMcp/HorizunMsProjectMcp.csproj`.
-2. Add `NUGET_API_KEY` under **Settings → Secrets and variables → Actions**, once.
-3. `git tag v1.0.0 && git push origin v1.0.0`.
+2. `git tag v1.0.0 && git push origin v1.0.0`.
 
 The workflow runs all five suites before it packs anything and refuses to publish if the built
 version does not match the tag. A version on NuGet cannot be deleted afterwards, only hidden, which
 is why nothing ships that has not passed everything first.
+
+The trust policy lives at [nuget.org/account/trustedpublishing](https://www.nuget.org/account/trustedpublishing)
+and is pinned to this repository and to this workflow file. Renaming `release.yml` breaks publishing
+until the policy is updated — deliberately, since the file name is part of what NuGet is trusting.

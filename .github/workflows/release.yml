@@ -1,8 +1,13 @@
 name: publish to nuget
 
-# Publishing is driven by a tag, and the key lives in a repository secret that only the
-# repository owner ever sees. It is never pasted into a terminal, never in the history,
-# and never in a log.
+# Publishing is driven by a tag and authenticated with NuGet Trusted Publishing, so there is
+# no API key anywhere: not in a secret, not in a terminal, not in this file. NuGet trusts a
+# short-lived OIDC token that GitHub mints for this repository and this workflow file only,
+# and its own guidance is that API keys are discouraged for automated publishing.
+#
+# The trust is registered at nuget.org/account/trustedpublishing and is pinned to
+# HorizunGroup/horizun-msproject-mcp and to this file. Renaming this file breaks publishing
+# until the policy is updated, which is the point.
 on:
   push:
     tags: ['v*']
@@ -15,6 +20,13 @@ on:
 jobs:
   publish:
     runs-on: windows-latest
+
+    permissions:
+      # id-token is what lets GitHub mint the OIDC token NuGet trusts; contents is for
+      # attaching the package to the release.
+      id-token: write
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
@@ -64,17 +76,20 @@ jobs:
           fi
           echo "publishing HorizunMsProjectMcp.$expected.nupkg"
 
+      # Exchanges the OIDC token for a key that lives for a few minutes inside this runner.
+      # Nothing to store, nothing to rotate, nothing to leak.
+      - name: Authenticate with NuGet
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: pablo-horizun
+
       - name: Push to NuGet
         shell: bash
         run: |
-          if [ -z "${{ secrets.NUGET_API_KEY }}" ]; then
-            echo "NUGET_API_KEY is not set. Add it under Settings > Secrets and variables >"
-            echo "Actions > New repository secret, then re-run this workflow."
-            exit 1
-          fi
           dotnet nuget push nupkg/*.nupkg \
             --source https://api.nuget.org/v3/index.json \
-            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
             --skip-duplicate
 
       - name: Attach the package to the release
