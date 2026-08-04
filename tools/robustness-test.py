@@ -241,6 +241,15 @@ def main() -> int:
               c.call("project_health")["sessions"]["open"] <= limit,
               f"{c.call('project_health')['sessions']['open']} open")
 
+        # The first handle was retired to make room; using it again should explain that,
+        # not claim it never existed.
+        stale = c.call("tasks_query", handle=readonly_handles[0])
+        check("a handle retired to make room says so, rather than looking like a bug",
+              "__error__" in stale
+              and "closed automatically" in stale["__error__"]
+              and "nothing was lost" in stale["__error__"],
+              str(stale.get("__error__"))[:120])
+
         # Unsaved work is never discarded to make room, even under pressure.
         dirty = []
         for n in range(limit):

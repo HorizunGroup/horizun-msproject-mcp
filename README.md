@@ -206,11 +206,11 @@ cd src/HorizunMsProjectMcp && dotnet build && cd ../..
 python tools/acceptance-test.py   # 65 checks, all 20 tools end to end
 python tools/scheduler-test.py    # 45 checks, critical-path engine correctness
 python tools/planning-test.py     # 52 checks, reprogramming and learning
-python tools/robustness-test.py   # 33 checks, concurrency and hostile input
+python tools/robustness-test.py   # 34 checks, concurrency and hostile input
 python tools/smoke-test.py        # 13 checks, environment and capabilities
 ```
 
-**208 checks**, driven over real JSON-RPC against the running server, on Windows and on
+**209 checks**, driven over real JSON-RPC against the running server, on Windows and on
 Linux. The Linux job is the evidence for the headline claim: it runs on a machine with no
 JVM and no Microsoft Project.
 
@@ -270,7 +270,7 @@ tools/
   acceptance-test.py   end-to-end across all 20 tools, 65 checks
   scheduler-test.py    engine correctness, format round trips, safety guards, 45 checks
   planning-test.py     recovery, sequencing, target dates, learning, generation, 52 checks
-  robustness-test.py   concurrency, malformed input, resource limits, 33 checks
+  robustness-test.py   concurrency, malformed input, resource limits, 34 checks
   smoke-test.py        environment and capability matrix, 13 checks
 ```
 

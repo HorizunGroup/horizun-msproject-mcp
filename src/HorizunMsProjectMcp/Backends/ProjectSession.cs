@@ -134,6 +134,7 @@ public static class SessionStore
             }
 
             Sessions.TryRemove(evictable.Handle, out _);
+            Evicted[evictable.Handle] = System.IO.Path.GetFileName(evictable.Path);
         }
 
         var handle = $"d{Interlocked.Increment(ref _counter)}";
@@ -164,12 +165,30 @@ public static class SessionStore
         return session.Locked(() => body(session));
     }
 
-    public static ProjectSession Get(string handle) =>
-        Sessions.TryGetValue(handle, out var s)
-            ? s
-            : throw new McpToolException(
-                $"No open document with handle '{handle}'. Call project_open first; " +
-                $"currently open: {(Sessions.IsEmpty ? "none" : string.Join(", ", Sessions.Keys))}.");
+    /// <summary>Handles retired to make room, so their reuse can be explained rather than denied.</summary>
+    private static readonly ConcurrentDictionary<string, string> Evicted = new();
+
+    public static ProjectSession Get(string handle)
+    {
+        if (Sessions.TryGetValue(handle, out var session))
+        {
+            return session;
+        }
+
+        // A handle that was retired to make room is not the same situation as one that never
+        // existed, and telling the two apart saves the caller hunting for a bug that is not there.
+        if (Evicted.TryGetValue(handle, out var name))
+        {
+            throw new McpToolException(
+                $"Document '{handle}' ({name}) was closed automatically to make room for another "
+                + "schedule — it had no unsaved changes, so nothing was lost. Open it again with "
+                + "project_open. Close documents you have finished with to stop this happening.");
+        }
+
+        throw new McpToolException(
+            $"No open document with handle '{handle}'. Call project_open first; " +
+            $"currently open: {(Sessions.IsEmpty ? "none" : string.Join(", ", Sessions.Keys))}.");
+    }
 
     /// <summary>
     /// Resolves a handle for a write and refuses if the file changed on disk since it was opened.
