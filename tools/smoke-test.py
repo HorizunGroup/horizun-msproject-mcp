@@ -142,11 +142,21 @@ def main() -> int:
                 bool(project.get("diagnosis")),
                 "no diagnosis attached",
             )
-            check(
-                "a failed COM probe offers a repair path",
-                bool(project.get("repair")),
-                "no repair steps attached",
-            )
+            # Repair steps are owed only where something can actually be repaired. On a platform
+            # without COM there is nothing to fix, and inventing advice would be noise.
+            if project.get("actionable", True):
+                check(
+                    "a fixable COM problem offers a repair path",
+                    bool(project.get("repair")),
+                    "no repair steps attached",
+                )
+            else:
+                check(
+                    "an unfixable COM situation says so instead of offering repair steps",
+                    not project.get("repair")
+                    and "nothing to fix" in (project.get("diagnosis") or ""),
+                    str(project.get("diagnosis"))[:90],
+                )
     finally:
         client.close()
 

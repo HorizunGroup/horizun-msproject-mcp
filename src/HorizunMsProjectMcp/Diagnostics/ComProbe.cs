@@ -17,6 +17,14 @@ public sealed record ComProbeResult
     public required bool Available { get; init; }
     public required string Status { get; init; }
 
+    /// <summary>
+    /// Whether anything can be done about it. False where COM simply does not exist — on Linux or
+    /// macOS there is nothing to repair, and offering repair steps would be noise. True where
+    /// Microsoft Project is present but its COM server will not start, which is fixable and worth
+    /// the instructions.
+    /// </summary>
+    public bool Actionable { get; init; } = true;
+
     /// <summary>Set when the probe was registry-only (see <see cref="ComProbe.Inspect"/>).</summary>
     public bool Launched { get; init; }
 
@@ -51,7 +59,11 @@ public static class ComProbe
             {
                 Available = false,
                 Status = "unsupported_platform",
-                Diagnosis = "COM automation only exists on Windows. The MPXJ backend covers this platform.",
+                Actionable = false,
+                Diagnosis =
+                    "COM automation only exists on Windows, so Microsoft Project cannot be driven here "
+                    + "and there is nothing to fix. Everything except writing the native binary .mpp "
+                    + "runs on the MPXJ backend, which needs neither Windows nor Microsoft Project.",
             };
         }
 

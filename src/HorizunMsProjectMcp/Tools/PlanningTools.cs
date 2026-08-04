@@ -39,13 +39,15 @@ public static class PlanningTools
         string? targetFinish = null,
         [Description("How many recovery options to return. Defaults to 5.")] int maxOptions = 5)
     {
-        var session = SessionStore.Get(handle);
-        var effective = QueryTools.ParseDate(statusDate)
-                        ?? session.File.ProjectProperties.StatusDate
-                        ?? DateTime.Today;
+        return SessionStore.Use(handle, session =>
+        {
+            var effective = QueryTools.ParseDate(statusDate)
+                            ?? session.File.ProjectProperties.StatusDate
+                            ?? DateTime.Today;
 
-        return RecoveryPlanner.Analyse(
-            session.File, effective, QueryTools.ParseDate(targetFinish), maxOptions);
+            return RecoveryPlanner.Analyse(
+                session.File, effective, QueryTools.ParseDate(targetFinish), maxOptions);
+    });
     }
 
     [McpServerTool(Name = "schedule_target")]
@@ -61,12 +63,14 @@ public static class PlanningTools
         [Description("'finish' (default) to test a completion date, or 'start' to test a start date.")]
         string anchor = "finish")
     {
-        var session = SessionStore.Get(handle);
-        var date = QueryTools.ParseDate(target)
-                   ?? throw new McpToolException("A target date is required, as yyyy-MM-dd.");
+        return SessionStore.Use(handle, session =>
+        {
+            var date = QueryTools.ParseDate(target)
+                       ?? throw new McpToolException("A target date is required, as yyyy-MM-dd.");
 
-        var byFinish = !anchor.Trim().Equals("start", StringComparison.OrdinalIgnoreCase);
-        return TargetPlanner.Analyse(session.File, date, byFinish);
+            var byFinish = !anchor.Trim().Equals("start", StringComparison.OrdinalIgnoreCase);
+            return TargetPlanner.Analyse(session.File, date, byFinish);
+    });
     }
 
     [McpServerTool(Name = "schedule_sequence")]
@@ -105,45 +109,47 @@ public static class PlanningTools
         [Description("Write the proposed links instead of only reporting them. Defaults to false.")]
         bool apply = false)
     {
-        var session = SessionStore.Get(handle);
-        var report = SequenceInferrer.Infer(
-            session.File, groupBy, Math.Clamp(minAgreement, 0.5, 1.0), Math.Max(maxLinks, 1),
-            Math.Clamp(groupDepth, 1, 8));
-
-        if (!apply || report.Links.Count == 0)
+        return SessionStore.Use<object>(handle, session =>
         {
-            return report;
-        }
+            var report = SequenceInferrer.Infer(
+                session.File, groupBy, Math.Clamp(minAgreement, 0.5, 1.0), Math.Max(maxLinks, 1),
+                Math.Clamp(groupDepth, 1, 8));
 
-        // Applying goes through the ordinary verified write path, so each link is re-read from the
-        // model before it counts and a cycle is refused rather than created.
-        var write = WriteTools.LinksWrite(handle, report.Links
-            .Select(l => new LinkOp
+            if (!apply || report.Links.Count == 0)
             {
-                Op = "link",
-                From = l.FromUid,
-                To = l.ToUid,
-                Type = l.Type,
-                Lag = preserveDates && l.GapDays > 0 ? $"{l.GapDays}d" : null,
-            })
-            .ToArray());
+                return report;
+            }
 
-        var advice = preserveDates
-            ? "Linked at the gap each pair already had, so no date moved — but every link is now a "
-              + "positive lag, which DCMA check 3 counts against the schedule. Measured on a real "
-              + "5,985-task programme this took lags from 1.8% of tasks to 31% and scored worse than "
-              + "leaving the schedule alone. Prefer preserveDates=false unless a date is genuinely "
-              + "fixed."
-            : "Linked at zero lag. The dates will move on the next recalculation, and that is the "
-              + "point: an unlinked bar chart cannot tell you when the work finishes, so the new date "
-              + "is the first honest one. Run schedule_update with op='recalculate' and compare "
-              + "before committing.";
+            // Applying goes through the ordinary verified write path, so each link is re-read from the
+            // model before it counts and a cycle is refused rather than created.
+            var write = WriteTools.LinksWrite(handle, report.Links
+                .Select(l => new LinkOp
+                {
+                    Op = "link",
+                    From = l.FromUid,
+                    To = l.ToUid,
+                    Type = l.Type,
+                    Lag = preserveDates && l.GapDays > 0 ? $"{l.GapDays}d" : null,
+                })
+                .ToArray());
 
-        return new
-        {
-            sequence = report with { Notes = report.Notes.Append(advice).ToList() },
-            applied = write,
-        };
+            var advice = preserveDates
+                ? "Linked at the gap each pair already had, so no date moved — but every link is now a "
+                  + "positive lag, which DCMA check 3 counts against the schedule. Measured on a real "
+                  + "5,985-task programme this took lags from 1.8% of tasks to 31% and scored worse than "
+                  + "leaving the schedule alone. Prefer preserveDates=false unless a date is genuinely "
+                  + "fixed."
+                : "Linked at zero lag. The dates will move on the next recalculation, and that is the "
+                  + "point: an unlinked bar chart cannot tell you when the work finishes, so the new date "
+                  + "is the first honest one. Run schedule_update with op='recalculate' and compare "
+                  + "before committing.";
+
+            return new
+            {
+                sequence = report with { Notes = report.Notes.Append(advice).ToList() },
+                applied = write,
+            };
+    });
     }
 
     [McpServerTool(Name = "schedule_learn")]

@@ -148,7 +148,14 @@ public static class SessionTools
         [Description("Keep the handle open after saving. Defaults to true.")] bool keepOpen = true,
         [Description("Allow close to drop unsaved changes. Defaults to false.")] bool discardChanges = false)
     {
-        var session = SessionStore.Get(handle);
+        return SessionStore.Use(handle, session => SaveCore(
+            session, handle, op, path, format, keepOpen, discardChanges));
+    }
+
+    private static SaveResult SaveCore(
+        ProjectSession session, string handle, string op, string? path,
+        string format, bool keepOpen, bool discardChanges)
+    {
         var operation = op.Trim().ToLowerInvariant();
 
         switch (operation)

@@ -56,9 +56,14 @@ public static class InteropTools
         [Description("Status date used for the earned-value block in pbip_dataset, yyyy-MM-dd.")]
         string? statusDate = null)
     {
-        var session = SessionStore.Get(handle);
+        return SessionStore.Use(handle, session => ExportCore(session, path, format, statusDate));
+    }
+
+    private static ExportResult ExportCore(
+        ProjectSession session, string path, string format, string? statusDate)
+    {
         var project = session.File;
-        var full = Path.GetFullPath(path);
+        var full = Guard.Path(path, "path");
         var directory = Path.GetDirectoryName(full);
         if (!string.IsNullOrEmpty(directory))
         {
@@ -164,7 +169,12 @@ public static class InteropTools
         [Description("Path to the CSV or JSON file to import.")] string path,
         [Description("Apply the plan. Defaults to false — plan only.")] bool apply = false)
     {
-        var session = SessionStore.Get(handle);
+        return SessionStore.Use(handle, session => ImportCore(session, handle, path, apply));
+    }
+
+    private static ImportPlan ImportCore(
+        ProjectSession session, string handle, string path, bool apply)
+    {
         var project = session.File;
 
         if (!File.Exists(path))
@@ -297,7 +307,13 @@ public static class InteropTools
         [Description("Mappings below this confidence are listed for review instead of stored. Defaults to 100.")]
         double reviewBelow = 100)
     {
-        var session = SessionStore.Get(handle);
+        return SessionStore.Use(handle, session =>
+            BimLinkCore(session, op, elementsPath, codeField, reviewBelow));
+    }
+
+    private static BimLinkResult BimLinkCore(
+        ProjectSession session, string op, string? elementsPath, string codeField, double reviewBelow)
+    {
 
         switch (op.Trim().ToLowerInvariant())
         {
@@ -392,7 +408,14 @@ public static class InteropTools
         double defaultProductivity = 1,
         [Description("Status date used to classify element progress, yyyy-MM-dd.")] string? statusDate = null)
     {
-        var session = SessionStore.Get(handle);
+        return SessionStore.Use(handle, session => BimSyncCore(
+            session, direction, outputPath, productivity, defaultProductivity, statusDate));
+    }
+
+    private static BimSyncResult BimSyncCore(
+        ProjectSession session, string direction, string? outputPath,
+        Dictionary<string, double>? productivity, double defaultProductivity, string? statusDate)
+    {
         var links = BimLinkStore.Load(session.Path);
 
         if (links.Mappings.Count == 0)

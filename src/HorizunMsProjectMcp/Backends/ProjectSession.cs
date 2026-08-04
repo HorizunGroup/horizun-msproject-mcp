@@ -48,16 +48,29 @@ public sealed class ProjectSession
     /// </remarks>
     public T Locked<T>(Func<T> body)
     {
+        // Reentrant on purpose. Several tools are built on others — schedule_sequence applies its
+        // proposals through links_write, project_import through tasks_write — and a plain semaphore
+        // would have them wait on a lock their own call already holds, hanging the server outright.
+        var me = Environment.CurrentManagedThreadId;
+        if (Volatile.Read(ref _owner) == me)
+        {
+            return body();
+        }
+
         _gate.Wait();
+        Volatile.Write(ref _owner, me);
         try
         {
             return body();
         }
         finally
         {
+            Volatile.Write(ref _owner, 0);
             _gate.Release();
         }
     }
+
+    private int _owner;
 
     /// <summary>
     /// Identity of the file on disk plus the shape of what we loaded. If either moves, a

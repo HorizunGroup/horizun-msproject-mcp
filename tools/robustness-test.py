@@ -209,6 +209,36 @@ def main() -> int:
         check("no two tasks share a uid", len(uids) == len(set(uids)),
               f"{len(uids) - len(set(uids))} duplicates")
 
+        # -------------------------------------------------------- nested tool calls
+        print("\n== tools built on other tools do not deadlock ==")
+
+        # schedule_sequence applies through links_write and project_import through tasks_write.
+        # Both run inside the document's lock, so a non-reentrant lock would hang the server here
+        # rather than fail — the worst way for this to break.
+        nest = work / "nested.xml"
+        hn = c.call("project_open", path=str(nest), create=True, startDate="2026-09-07")["handle"]
+        ops = []
+        for unit in (1, 2, 3):
+            for step, trade in enumerate(("Uno", "Dos", "Tres")):
+                ops.append({"op": "create", "name": f"{trade} apto {unit}0{unit}", "duration": "2d",
+                            "constraintType": "StartNoEarlierThan",
+                            "constraintDate": f"2026-09-{7 + step * 3 + (unit - 1):02}"})
+        c.call("tasks_write", handle=hn, ops=ops)
+
+        seq_id = c.send_call("schedule_sequence", handle=hn, groupDepth=1, apply=True)
+        check("schedule_sequence applying through links_write answers rather than hanging",
+              c.wait([seq_id], timeout=90), "no reply within 90s")
+
+        progress = work / "progress.csv"
+        uid = c.call("tasks_query", handle=hn, limit=1)["items"][0]["uid"]
+        progress.write_text(f"uid,percentComplete\n{uid},50\n", encoding="utf-8")
+        imp_id = c.send_call("project_import", handle=hn, path=str(progress), apply=True)
+        check("project_import applying through tasks_write answers rather than hanging",
+              c.wait([imp_id], timeout=90), "no reply within 90s")
+        check("the server is still responsive afterwards",
+              c.call("project_info", handle=hn).get("tasks", 0) > 0)
+        c.call("project_save", handle=hn, op="close", discardChanges=True)
+
         # ------------------------------------------------- unusual but legal input
         print("\n== unusual but legal input ==")
         odd = c.call("tasks_write", handle=h, ops=[
