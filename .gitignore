@@ -14,5 +14,3 @@ nupkg/
 .claude/
 
 # Cross-platform publish output.
-bin/
-obj/

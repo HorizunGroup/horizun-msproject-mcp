@@ -134,6 +134,14 @@ public static class SessionStore
             }
 
             Sessions.TryRemove(evictable.Handle, out _);
+
+            // Remember why, but not forever: this exists to explain a handle somebody is still
+            // holding, and a long-lived server would otherwise accumulate an entry per open.
+            if (Evicted.Count >= 200)
+            {
+                Evicted.Clear();
+            }
+
             Evicted[evictable.Handle] = System.IO.Path.GetFileName(evictable.Path);
         }
 
