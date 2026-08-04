@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.horizungroup/horizun-msproject-mcp",
   "title": "Microsoft Project",
-  "description": "Read, audit, reschedule and author Microsoft Project schedules with no Java runtime and no Microsoft Project installed. Critical-path engine, DCMA 14-point assessment, earned value, verified writes, and a BIM bridge for 4D.",
+  "description": "Audit, reschedule and author Microsoft Project schedules. No Java, no Project install.",
   "version": "1.0.1",
   "repository": {
     "url": "https://github.com/HorizunGroup/horizun-msproject-mcp",
