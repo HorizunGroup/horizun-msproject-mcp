@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AssemblyName>horizun-msproject-mcp</AssemblyName>
+    <RootNamespace>Horizun.ProjectMcp</RootNamespace>
+    <!-- COM + Registry are Windows-only; we guard every call site with
+         OperatingSystem.IsWindows() and report the gap via project_health
+         instead of failing to build on other platforms. -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+
+  <!-- Installable with a single command via "dotnet tool install". Every competitor
+       needs a JVM, a licensed Microsoft Project, or a paid driver first. -->
+  <PropertyGroup>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>horizun-msproject-mcp</ToolCommandName>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)../../nupkg</PackageOutputPath>
+    <PackageId>HorizunMsProjectMcp</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Horizun</Authors>
+    <Description>
+      MCP server for Microsoft Project schedules. Reads and writes .mpp, MSPDI, Primavera XER/PMXML
+      and more with no Java runtime and no Microsoft Project installed. Includes a critical-path
+      engine, the DCMA 14-point schedule assessment, earned value, verified writes, and a BIM bridge
+      for 4D.
+    </Description>
+    <PackageTags>mcp;model-context-protocol;microsoft-project;mpp;scheduling;critical-path;dcma;primavera;bim;4d</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="2.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+    <PackageReference Include="MPXJ.Net" Version="16.1.0" />
+  </ItemGroup>
+
+</Project>

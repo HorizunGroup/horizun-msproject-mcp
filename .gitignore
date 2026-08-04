@@ -1,0 +1,14 @@
+bin/
+obj/
+nupkg/
+*.user
+
+# Sidecar written next to a schedule by bim_link — belongs to the project, not the repo.
+*.hzbim.json
+
+# Scratch output from the test suites.
+*.mpp
+!docs/**/*.mpp
+
+# Local Claude Code session state.
+.claude/
