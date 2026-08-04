@@ -66,3 +66,16 @@ Every tool needs a description that says what it does, what it costs, and when n
 A change that fixes a bug should come with the check that would have caught it. Several of the
 suites' assertions exist because a real schedule broke something in a way no synthetic fixture ever
 would have.
+
+## Releasing
+
+Publishing runs from a tag, so the NuGet key lives in a repository secret and is never pasted
+anywhere:
+
+1. Set `<Version>` in `src/HorizunMsProjectMcp/HorizunMsProjectMcp.csproj`.
+2. Add `NUGET_API_KEY` under **Settings → Secrets and variables → Actions**, once.
+3. `git tag v1.0.0 && git push origin v1.0.0`.
+
+The workflow runs all five suites before it packs anything and refuses to publish if the built
+version does not match the tag. A version on NuGet cannot be deleted afterwards, only hidden, which
+is why nothing ships that has not passed everything first.

@@ -1,0 +1,85 @@
+name: publish to nuget
+
+# Publishing is driven by a tag, and the key lives in a repository secret that only the
+# repository owner ever sees. It is never pasted into a terminal, never in the history,
+# and never in a log.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, e.g. 1.0.0'
+        required: true
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache NuGet and the IKVM translation
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.nuget/packages
+            src/HorizunMsProjectMcp/obj
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Build
+        run: dotnet build src/HorizunMsProjectMcp -c Debug --nologo
+
+      # A version on NuGet cannot be deleted, only hidden. Nothing ships that has not passed
+      # everything first.
+      - name: Prove it works before publishing anything
+        run: |
+          python tools/smoke-test.py
+          python tools/acceptance-test.py
+          python tools/scheduler-test.py
+          python tools/planning-test.py
+          python tools/robustness-test.py
+
+      - name: Pack
+        run: dotnet pack src/HorizunMsProjectMcp -c Release --nologo
+
+      - name: Check the version matches the tag
+        shell: bash
+        run: |
+          expected="${{ github.event.inputs.version }}"
+          if [ -z "$expected" ]; then expected="${GITHUB_REF_NAME#v}"; fi
+          if [ ! -f "nupkg/HorizunMsProjectMcp.$expected.nupkg" ]; then
+            echo "The tag asks for $expected but the package built is:"
+            ls nupkg/
+            echo "Update <Version> in the csproj to match the tag before releasing."
+            exit 1
+          fi
+          echo "publishing HorizunMsProjectMcp.$expected.nupkg"
+
+      - name: Push to NuGet
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.NUGET_API_KEY }}" ]; then
+            echo "NUGET_API_KEY is not set. Add it under Settings > Secrets and variables >"
+            echo "Actions > New repository secret, then re-run this workflow."
+            exit 1
+          fi
+          dotnet nuget push nupkg/*.nupkg \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --skip-duplicate
+
+      - name: Attach the package to the release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: nupkg/*.nupkg
+          generate_release_notes: true
