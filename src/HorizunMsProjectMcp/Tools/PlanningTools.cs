@@ -69,6 +69,83 @@ public static class PlanningTools
         return TargetPlanner.Analyse(session.File, date, byFinish);
     }
 
+    [McpServerTool(Name = "schedule_sequence")]
+    [Description(
+        "Recover the logic a schedule is missing by reading the order its own dates already state. "
+        + "A schedule whose work was laid out in the right order but never linked is a bar chart, "
+        + "not a network: nothing moves when anything slips, float reads as enormous, and any target "
+        + "date computed over it is arithmetic. This finds the repeating groups — apartments, floors, "
+        + "spans, wells, whatever the work repeats over — reads the order each one runs in, keeps only "
+        + "the orderings the repetitions agree on, and proposes the missing links. "
+        + "It never invents an order the dates do not state and never proposes a link where a path "
+        + "already exists. Defaults to proposing only; pass apply=true to write them, verified.")]
+    public static object ScheduleSequence(
+        [Description("Document handle from project_open.")] string handle,
+        [Description(
+            "'unit' (default) groups by the identifier that varies between repetitions — the number "
+            + "at the end of a task name. 'parent' groups by the WBS parent instead.")]
+        string groupBy = "unit",
+        [Description(
+            "How strongly the repetitions must agree on an ordering before it is trusted, 0-1. "
+            + "Defaults to 0.8. Lower it only where the variation between units is genuine.")]
+        double minAgreement = 0.8,
+        [Description("Maximum links to propose in one pass. Defaults to 500.")] int maxLinks = 500,
+        [Description(
+            "How far down the WBS the grouping branch sits — the tower, phase or building a unit "
+            + "number is unique within. Defaults to 2. Raise it where units repeat within a deeper "
+            + "branch; lower it where one number covers the whole project.")]
+        int groupDepth = 2,
+        [Description(
+            "Carry the existing gap between each pair as lag so no date moves. Off by default: it "
+            + "sounds like the safe choice and measurably is not, because it turns every recovered "
+            + "link into a positive lag. On a real schedule that took lags from 1.8% of tasks to 31% "
+            + "and made the DCMA assessment worse than not linking at all. Linking at zero lag scored "
+            + "better than the untouched schedule. Use this only where a date must not move.")]
+        bool preserveDates = false,
+        [Description("Write the proposed links instead of only reporting them. Defaults to false.")]
+        bool apply = false)
+    {
+        var session = SessionStore.Get(handle);
+        var report = SequenceInferrer.Infer(
+            session.File, groupBy, Math.Clamp(minAgreement, 0.5, 1.0), Math.Max(maxLinks, 1),
+            Math.Clamp(groupDepth, 1, 8));
+
+        if (!apply || report.Links.Count == 0)
+        {
+            return report;
+        }
+
+        // Applying goes through the ordinary verified write path, so each link is re-read from the
+        // model before it counts and a cycle is refused rather than created.
+        var write = WriteTools.LinksWrite(handle, report.Links
+            .Select(l => new LinkOp
+            {
+                Op = "link",
+                From = l.FromUid,
+                To = l.ToUid,
+                Type = l.Type,
+                Lag = preserveDates && l.GapDays > 0 ? $"{l.GapDays}d" : null,
+            })
+            .ToArray());
+
+        var advice = preserveDates
+            ? "Linked at the gap each pair already had, so no date moved — but every link is now a "
+              + "positive lag, which DCMA check 3 counts against the schedule. Measured on a real "
+              + "5,985-task programme this took lags from 1.8% of tasks to 31% and scored worse than "
+              + "leaving the schedule alone. Prefer preserveDates=false unless a date is genuinely "
+              + "fixed."
+            : "Linked at zero lag. The dates will move on the next recalculation, and that is the "
+              + "point: an unlinked bar chart cannot tell you when the work finishes, so the new date "
+              + "is the first honest one. Run schedule_update with op='recalculate' and compare "
+              + "before committing.";
+
+        return new
+        {
+            sequence = report with { Notes = report.Notes.Append(advice).ToList() },
+            applied = write,
+        };
+    }
+
     [McpServerTool(Name = "schedule_learn")]
     [Description(
         "Mine finished schedules for how long each kind of activity actually takes and what usually "

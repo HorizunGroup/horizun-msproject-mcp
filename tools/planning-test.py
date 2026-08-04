@@ -154,6 +154,54 @@ def main() -> int:
         client.call("project_save", handle=handle, op="save")
         client.call("project_save", handle=handle, op="close")
 
+        # ------------------------------------------ recovering logic from the dates
+        print("\n== schedule_sequence ==")
+
+        # A bar chart: the work is laid out in the right order but never linked.
+        chart = workdir / "barchart.xml"
+        hb = client.call("project_open", path=str(chart), create=True, startDate="2026-09-07")["handle"]
+        order = ["Estructura", "Instalaciones", "Mamposteria", "Enchapes", "Aseo"]
+        ops = []
+        for unit in (1, 2, 3, 4):
+            for step, trade in enumerate(order):
+                ops.append({"op": "create", "name": f"{trade} apto {unit}0{unit}", "duration": "2d",
+                            "constraintType": "StartNoEarlierThan",
+                            "constraintDate": f"2026-{9 + (unit - 1)}-{7 + step * 3:02}"})
+        client.call("tasks_write", handle=hb, ops=ops)
+        client.call("project_save", handle=hb, op="save")
+        client.call("project_save", handle=hb, op="close")
+
+        hb = client.call("project_open", path=str(chart))["handle"]
+        seq = client.call("schedule_sequence", handle=hb, groupDepth=1)
+        check("the sequence is read out of the dates", seq["proposed"] > 0,
+              f"{seq['proposed']} links across {seq['groups']} groups")
+        check("and the order matches how the work was laid out",
+              seq["inferredOrder"][:3] == ["ESTRUCTURA APTO", "INSTALACIONES APTO", "MAMPOSTERIA APTO"],
+              json.dumps(seq["inferredOrder"][:4]))
+        check("the repetitions agree on it", seq["orderConfidence"] >= 90,
+              f"{seq['orderConfidence']}%")
+        check("nothing was written by merely asking",
+              client.call("links_query", handle=hb)["total"] == 0)
+
+        applied = client.call("schedule_sequence", handle=hb, groupDepth=1, apply=True)
+        check("applying goes through the verified write path",
+              applied["applied"]["applied"] == applied["sequence"]["proposed"]
+              and applied["applied"]["verifiedBy"] == "reread",
+              f"{applied['applied']['applied']} applied, "
+              f"{len(applied['applied']['rejected'])} rejected")
+        check("links at zero lag by default, because carrying the gaps scores worse",
+              all(l["lagDays"] == 0 for l in client.call("links_query", handle=hb)["items"]),
+              str({l["lagDays"] for l in client.call("links_query", handle=hb)["items"]}))
+
+        again = client.call("schedule_sequence", handle=hb, groupDepth=1)
+        check("a second pass proposes nothing, since the paths now exist",
+              again["proposed"] == 0, f"{again['proposed']} proposed")
+        check("and says so rather than returning an empty list",
+              any("already connected" in n for n in again.get("notes", [])),
+              json.dumps(again.get("notes"))[:120])
+        client.call("project_save", handle=hb, op="close", discardChanges=True)
+
+
         # ---------------------------------------------------------------- learn
         print("\n== schedule_learn ==")
 
