@@ -204,6 +204,62 @@ def main() -> int:
               enchapes and any(p["key"] == "MAMPOSTERIA APTO" for p in enchapes["typicalPredecessors"]),
               json.dumps([p["key"] for p in (enchapes or {}).get("typicalPredecessors", [])]))
 
+        # --------------------------------------------- productivity from quantities
+        print("\n== productivity learned from measured quantities ==")
+
+        # Codes on the tasks, quantities on the model elements — they join on the code.
+        for project in ("obra-2024", "obra-2025"):
+            h = client.call("project_open", path=str(workdir / f"{project}.xml"))["handle"]
+            rows = client.call("tasks_query", handle=h, limit=50)["items"]
+            client.call("tasks_write", handle=h, ops=[
+                {"op": "update", "uid": t["uid"],
+                 "custom": {"Text1": "MAM-01" if "Mamposteria" in t["name"] else "ENC-01"}}
+                for t in rows if str(t["name"]).startswith(("Mamposteria", "Enchapes"))])
+            client.call("project_save", handle=h, op="save")
+            client.call("project_save", handle=h, op="close")
+
+        elements = workdir / "cantidades.csv"
+        elements.write_text(
+            "elementId,code,quantity,unit\n"
+            "1,MAM-01,120,m2\n"
+            "2,MAM-01,120,m2\n"
+            "3,ENC-01,60,m2\n", encoding="utf-8")
+
+        no_code = client.call("schedule_learn",
+                              paths=[str(workdir / "obra-2024.xml")],
+                              quantitySources=[str(elements)], minOccurrences=2)
+        check("quantities without a code field are refused, with the reason",
+              "__error__" in no_code and "codeField" in no_code["__error__"],
+              no_code.get("__error__", "")[:110])
+
+        lib2_path = workdir / "library-rates.json"
+        lib2 = client.call("schedule_learn",
+                           paths=[str(workdir / "obra-2024.xml"), str(workdir / "obra-2025.xml")],
+                           savePath=str(lib2_path), codeField="Text1",
+                           quantitySources=[str(elements)], minOccurrences=2)
+        rated = {a["key"]: a for a in lib2["activities"]}
+        mam = rated.get("MAMPOSTERIA APTO")
+        check("a productivity rate is learned from quantity over duration",
+              mam is not None and mam.get("productivityPerDay") == 40,
+              f"240 m2 / 6d = {mam.get('productivityPerDay') if mam else '?'} per day")
+        check("the unit of measure comes along", mam is not None and mam.get("unit") == "m2",
+              str(mam.get("unit") if mam else None))
+        check("and the library says rates are now available",
+              any("productivity" in n.lower() for n in lib2.get("notes", [])))
+
+        sized = client.call("schedule_generate", libraryPath=str(lib2_path),
+                            outputPath=str(workdir / "por-cantidad.xml"), startDate="2027-01-04",
+                            units=1, quantities={"MAMPOSTERIA APTO": 400})
+        srows = client.call("tasks_query", handle=sized["handle"], limit=50)["items"]
+        mam_task = next((t for t in srows if "Mamposteria" in str(t["name"])), None)
+        check("a new schedule is sized from measured quantity, not a remembered duration",
+              mam_task is not None and mam_task["duration"] == "10d",
+              f"400 m2 at 40/day should be 10d, got {mam_task['duration'] if mam_task else '?'}")
+        check("and it shows the arithmetic it used",
+              any("40" in n and "400" in n for n in sized.get("notes", [])),
+              json.dumps(sized.get("notes"))[-150:])
+        client.call("project_save", handle=sized["handle"], op="close", discardChanges=True)
+
         # ------------------------------------------------------------- generate
         print("\n== schedule_generate ==")
         gen = client.call("schedule_generate", libraryPath=str(lib_path),

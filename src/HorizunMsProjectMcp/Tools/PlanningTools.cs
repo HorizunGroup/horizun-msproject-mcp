@@ -85,14 +85,27 @@ public static class PlanningTools
         [Description("Custom field holding the budget code, e.g. 'Text1', to carry into the library.")]
         string? codeField = null,
         [Description("Ignore activities seen fewer times than this. Defaults to 3.")]
-        int minOccurrences = 3)
+        int minOccurrences = 3,
+        [Description(
+            "Element exports (the same CSV or JSON bim_link reads) carrying measured quantities per "
+            + "code. Supply them together with codeField and the library reports a productivity rate "
+            + "per activity — how much a crew actually got through in a day — instead of only how "
+            + "long the task was typed as taking.")]
+        string[]? quantitySources = null)
     {
         if (paths.Length == 0)
         {
             throw new McpToolException("Give at least one schedule to learn from.");
         }
 
-        var library = ScheduleLibrary.Learn(paths, codeField, minOccurrences);
+        if (quantitySources is { Length: > 0 } && string.IsNullOrWhiteSpace(codeField))
+        {
+            throw new McpToolException(
+                "Quantities join to tasks on a shared code, so codeField is required alongside "
+                + "quantitySources — pass the custom field the schedules carry it in, e.g. 'Text1'.");
+        }
+
+        var library = ScheduleLibrary.Learn(paths, codeField, minOccurrences, quantitySources);
 
         if (!string.IsNullOrWhiteSpace(savePath))
         {
@@ -131,7 +144,12 @@ public static class PlanningTools
             + "schedules are actually shaped. Defaults to 1.")]
         int units = 1,
         [Description("Word naming a unit, used in the task names: 'apto', 'piso', 'torre'. Defaults to 'unidad'.")]
-        string unitLabel = "unidad")
+        string unitLabel = "unidad",
+        [Description(
+            "Measured quantities per activity key, e.g. {\"VACIADO LOSA\": 340}. Where the library "
+            + "learned a productivity rate for that activity, the duration is sized from the quantity "
+            + "instead of copied from history — the quantity is what changes between projects.")]
+        Dictionary<string, double>? quantities = null)
     {
         var library = ScheduleLibrary.Load(libraryPath);
         var start = QueryTools.ParseDate(startDate)
@@ -199,9 +217,26 @@ public static class PlanningTools
             return task;
         }
 
+        var byQuantity = new List<string>();
+        var normalisedQuantities = quantities is null
+            ? new Dictionary<string, double>(StringComparer.Ordinal)
+            : quantities.ToDictionary(
+                kv => ScheduleLibrary.Normalise(kv.Key), kv => kv.Value, StringComparer.Ordinal);
+
         foreach (var entry in chosen)
         {
             var days = usePercentile80 ? entry.P80DurationDays : entry.MedianDurationDays;
+
+            // A measured quantity beats a remembered duration: the rate is what carries over
+            // between projects, the quantity is what changes.
+            if (normalisedQuantities.TryGetValue(entry.Key, out var quantity)
+                && entry.ProductivityPerDay is > 0 && quantity > 0)
+            {
+                days = Math.Round(quantity / entry.ProductivityPerDay.Value, 2);
+                byQuantity.Add($"{entry.Label ?? entry.Key}: {quantity:0.##} {entry.Unit ?? "units"} "
+                               + $"at {entry.ProductivityPerDay:0.##}/day = {days:0.##}d");
+            }
+
             var stem = StripUnitSuffix(entry.Label ?? entry.Key);
 
             // Per-unit work is anything the history saw several times in a single project —
@@ -352,6 +387,20 @@ public static class PlanningTools
         if (unmatched.Count > 0)
         {
             notes.Add($"{unmatched.Count} requested activity(ies) are not in the library and were skipped.");
+        }
+
+        if (byQuantity.Count > 0)
+        {
+            notes.Add($"{byQuantity.Count} activity(ies) sized from measured quantity and learned "
+                      + $"productivity rather than from a remembered duration: "
+                      + string.Join("; ", byQuantity.Take(6)));
+        }
+        else if (quantities is { Count: > 0 })
+        {
+            notes.Add(
+                "None of the supplied quantities matched an activity carrying a learned productivity "
+                + "rate, so every duration came from history. Run schedule_learn with quantitySources "
+                + "and codeField to teach it the rates first.");
         }
 
         if (report.Warnings.Count > 0)

@@ -74,6 +74,12 @@ schedules for how long each activity actually takes and what usually comes befor
 `schedule_generate` turns that into a first draft, one task per apartment or floor, sequenced the
 way the history says the trades follow each other.
 
+Feed `schedule_learn` a model export alongside the schedules and it measures **productivity** —
+what a crew actually got through in a day — by joining quantities to tasks on the shared code.
+`schedule_generate` then sizes durations from the quantities of the new project rather than
+copying a remembered duration, because the rate is what carries between projects and the quantity
+is what changes.
+
 **Interop** — `project_export` · `project_import` · `bim_link` · `bim_sync`
 
 CSV, JSON, MSPDI, Primavera XER and PMXML, native `.mpp`, and a shaped Power BI dataset. Imports
@@ -185,11 +191,11 @@ can do.
 cd src/HorizunMsProjectMcp && dotnet build && cd ../..
 python tools/acceptance-test.py   # 65 checks, all 20 tools end to end
 python tools/scheduler-test.py    # 45 checks, critical-path engine correctness
-python tools/planning-test.py     # 30 checks, reprogramming and learning
+python tools/planning-test.py     # 36 checks, reprogramming and learning
 python tools/smoke-test.py        # 13 checks, environment and capabilities
 ```
 
-**153 checks**, driven over real JSON-RPC against the running server.
+**159 checks**, driven over real JSON-RPC against the running server.
 
 The acceptance suite builds a construction schedule from nothing and asserts the contracts above:
 that a dry run commits nothing, that a cycle is refused before it is applied, that a write to an
@@ -235,7 +241,7 @@ src/HorizunMsProjectMcp/
 tools/
   acceptance-test.py   end-to-end across all 20 tools, 65 checks
   scheduler-test.py    engine correctness, format round trips, safety guards, 45 checks
-  planning-test.py     recovery, target dates, learning and generation, 30 checks
+  planning-test.py     recovery, target dates, learning and generation, 36 checks
   smoke-test.py        environment and capability matrix, 13 checks
 ```
 

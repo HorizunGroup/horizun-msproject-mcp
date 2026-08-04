@@ -85,7 +85,8 @@ public static class ScheduleLibrary
     };
 
     public static ActivityLibrary Learn(
-        IReadOnlyList<string> paths, string? codeField, int minOccurrences)
+        IReadOnlyList<string> paths, string? codeField, int minOccurrences,
+        IReadOnlyList<string>? quantitySources = null)
     {
         var samples = new Dictionary<string, List<Sample>>(StringComparer.Ordinal);
         var labels = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -94,6 +95,11 @@ public static class ScheduleLibrary
         var sources = new List<string>();
         var tasksRead = 0;
         var slot = codeField is null ? 0 : Dcma14.ParseTextSlot(codeField);
+
+        // Quantities come from the model, not the schedule: construction programmes almost never
+        // carry them, which is why productivity cannot be learned from durations alone. Element
+        // exports are keyed by the same code the schedule uses, so the two join on it.
+        var (quantityByCode, unitByCode) = LoadQuantities(quantitySources, notes);
 
         foreach (var path in paths)
         {
@@ -144,10 +150,25 @@ public static class ScheduleLibrary
 
                 tasksRead++;
 
+                var code = slot > 0 ? Dcma14.SafeGetText(task, slot) : null;
+                double? quantity = null;
+                string? unit = null;
+                if (!string.IsNullOrWhiteSpace(code))
+                {
+                    var normalisedCode = code.Trim().ToUpperInvariant();
+                    if (quantityByCode.TryGetValue(normalisedCode, out var q))
+                    {
+                        quantity = q;
+                        unit = unitByCode.GetValueOrDefault(normalisedCode);
+                    }
+                }
+
                 var sample = new Sample
                 {
                     DurationDays = days,
-                    Code = slot > 0 ? Dcma14.SafeGetText(task, slot) : null,
+                    Quantity = quantity,
+                    Unit = unit,
+                    Code = code,
                     Predecessors = task.Predecessors
                         .Select(r => (
                             Key: r.PredecessorTask?.UniqueID is { } u && keyByUid.TryGetValue(u, out var k) ? k : null,
@@ -192,6 +213,20 @@ public static class ScheduleLibrary
 
             var durations = list.Select(s => s.DurationDays).OrderBy(d => d).ToList();
 
+            // Productivity is what a crew actually gets through in a day. Take it per sample and
+            // then the median, rather than dividing the totals: one mis-scoped outlier would
+            // otherwise drag the rate for every future estimate built on it.
+            var quantities = list.Where(s => s.Quantity is > 0)
+                .Select(s => s.Quantity!.Value)
+                .OrderBy(q => q)
+                .ToList();
+            var rates = list
+                .Where(s => s.Quantity is > 0 && s.DurationDays > 0)
+                .Select(s => s.Quantity!.Value / s.DurationDays)
+                .OrderBy(r => r)
+                .ToList();
+            double? productivity = rates.Count == 0 ? null : Math.Round(Percentile(rates, 0.5), 3);
+
             // Work that repeats unit by unit shows up as an activity whose predecessor is itself.
             var selfLinks = list
                 .SelectMany(s => s.Predecessors)
@@ -214,6 +249,9 @@ public static class ScheduleLibrary
                 MinDurationDays = Math.Round(durations.First(), 2),
                 MaxDurationDays = Math.Round(durations.Last(), 2),
                 P80DurationDays = Math.Round(Percentile(durations, 0.8), 2),
+                MedianQuantity = quantities.Count == 0 ? null : Math.Round(Percentile(quantities, 0.5), 3),
+                Unit = list.Select(s => s.Unit).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u)),
+                ProductivityPerDay = productivity,
                 TypicalPredecessors = Summarise(list.SelectMany(s => s.Predecessors), list.Count),
                 TypicalSuccessors = Summarise(list.SelectMany(s => s.Successors), list.Count),
                 RepeatsInSequence = selfLinked > list.Count * 0.5,
@@ -363,9 +401,62 @@ public static class ScheduleLibrary
         }
     }
 
+    /// <summary>
+    /// Reads element exports and totals the quantity behind each code, so an activity's
+    /// productivity can be measured against the work it actually covered.
+    /// </summary>
+    private static (Dictionary<string, double>, Dictionary<string, string>) LoadQuantities(
+        IReadOnlyList<string>? sources, List<string> notes)
+    {
+        var totals = new Dictionary<string, double>(StringComparer.Ordinal);
+        var units = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        if (sources is null || sources.Count == 0)
+        {
+            return (totals, units);
+        }
+
+        foreach (var source in sources)
+        {
+            try
+            {
+                foreach (var element in Bim.BimLinkStore.LoadElements(Path.GetFullPath(source)))
+                {
+                    if (string.IsNullOrWhiteSpace(element.Code) || element.Quantity is not > 0)
+                    {
+                        continue;
+                    }
+
+                    var code = element.Code.Trim().ToUpperInvariant();
+                    totals[code] = totals.GetValueOrDefault(code) + element.Quantity.Value;
+                    if (!string.IsNullOrWhiteSpace(element.Unit))
+                    {
+                        units.TryAdd(code, element.Unit!);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                notes.Add($"Could not read quantities from '{source}': {ex.Message}");
+            }
+        }
+
+        if (totals.Count > 0)
+        {
+            notes.Add(
+                $"Quantities loaded for {totals.Count} code(s). Activities that match one report a "
+                + "productivity rate, so a future schedule can be sized from measured quantities "
+                + "rather than from a duration somebody typed.");
+        }
+
+        return (totals, units);
+    }
+
     private sealed class Sample
     {
         public required double DurationDays { get; init; }
+        public double? Quantity { get; init; }
+        public string? Unit { get; init; }
         public string? Code { get; init; }
         public required List<(string Key, string Type, double Lag)> Predecessors { get; init; }
         public required List<(string Key, string Type, double Lag)> Successors { get; init; }
