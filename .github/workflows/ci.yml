@@ -6,6 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A run takes minutes because of the IKVM translation, so several pushes in a row would
+# otherwise queue up behind each other testing code nobody is waiting on.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows:
     # The full suite runs here because two things only exist on Windows: writing a genuine
