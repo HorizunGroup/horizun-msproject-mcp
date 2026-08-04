@@ -81,6 +81,11 @@ copying a remembered duration, because the rate is what carries between projects
 is what changes. Give one export per schedule, in the same order: rates are measured per project,
 and quantities totalled across projects would inflate every one of them.
 
+A draft can only be as well sequenced as the schedules it learned from. Where the sources link each
+activity to itself unit after unit but never to the trades around it, both tools say so and name the
+number: the library reports how many activities learned a predecessor other than themselves, and the
+draft reports how many trades it left with nothing scheduled before them.
+
 **Interop** — `project_export` · `project_import` · `bim_link` · `bim_sync`
 
 CSV, JSON, MSPDI, Primavera XER and PMXML, native `.mpp`, and a shaped Power BI dataset. Imports
@@ -192,11 +197,11 @@ can do.
 cd src/HorizunMsProjectMcp && dotnet build && cd ../..
 python tools/acceptance-test.py   # 65 checks, all 20 tools end to end
 python tools/scheduler-test.py    # 45 checks, critical-path engine correctness
-python tools/planning-test.py     # 41 checks, reprogramming and learning
+python tools/planning-test.py     # 44 checks, reprogramming and learning
 python tools/smoke-test.py        # 13 checks, environment and capabilities
 ```
 
-**164 checks**, driven over real JSON-RPC against the running server.
+**167 checks**, driven over real JSON-RPC against the running server.
 
 The acceptance suite builds a construction schedule from nothing and asserts the contracts above:
 that a dry run commits nothing, that a cycle is refused before it is applied, that a write to an
@@ -242,7 +247,7 @@ src/HorizunMsProjectMcp/
 tools/
   acceptance-test.py   end-to-end across all 20 tools, 65 checks
   scheduler-test.py    engine correctness, format round trips, safety guards, 45 checks
-  planning-test.py     recovery, target dates, learning and generation, 41 checks
+  planning-test.py     recovery, target dates, learning and generation, 44 checks
   smoke-test.py        environment and capability matrix, 13 checks
 ```
 

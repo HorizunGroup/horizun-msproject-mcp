@@ -62,6 +62,15 @@ public sealed record ActivityLibrary
     public required IReadOnlyList<string> Sources { get; init; }
     public required int TasksRead { get; init; }
     public required IReadOnlyList<ActivityEntry> Activities { get; init; }
+
+    /// <summary>
+    /// How many activities learned a predecessor that is a *different* activity. This is the
+    /// number that decides whether a generated draft will be a network or a pile of work all
+    /// starting on day one — an activity whose only predecessor is itself carries no information
+    /// about what has to happen before the trade can begin.
+    /// </summary>
+    public int ActivitiesWithCrossLogic { get; init; }
+
     public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
 }
 
@@ -302,11 +311,26 @@ public static class ScheduleLibrary
             }
         }
 
+        var crossLinked = activities.Count(a => a.TypicalPredecessors.Any(x => x.Key != a.Key));
+
+        if (activities.Count > 0 && crossLinked < activities.Count * 0.6)
+        {
+            notes.Add(
+                $"Only {crossLinked} of {activities.Count} activities learned a predecessor that is a "
+                + "different activity — the rest are only sequenced against themselves, unit after "
+                + "unit. That is what the source schedules contain, and a draft generated from this "
+                + "library will start most trades on the same day because nothing in it says what has "
+                + "to finish first. Run schedule_qa on the sources: a schedule with roughly one link "
+                + "per task has this shape, and the missing logic is real rather than an artefact of "
+                + "learning.");
+        }
+
         return new ActivityLibrary
         {
             Sources = sources,
             TasksRead = tasksRead,
             Activities = activities.OrderByDescending(a => a.Occurrences).ToList(),
+            ActivitiesWithCrossLogic = crossLinked,
             Notes = notes,
         };
     }

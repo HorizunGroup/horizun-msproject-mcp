@@ -404,6 +404,29 @@ public static class PlanningTools
             notes.Add($"{unmatched.Count} requested activity(ies) are not in the library and were skipped.");
         }
 
+        // The telling number is not how many tasks start on day one — with long unit chains that
+        // stays small — but how many separate trades do. Each activity whose first unit has no
+        // predecessor is a trade nothing sequences, so it begins on day one regardless of what it
+        // physically sits on. Counting tasks hid that; counting trades shows it.
+        var unsequenced = chosen.Count(entry =>
+        {
+            var head = project.GetTaskByUniqueID(uidByKey[entry.Key]);
+            return head is not null && head.Predecessors.Count == 0;
+        });
+
+        // A real programme has a handful of genuine starting points — mobilisation, procurement,
+        // site setup. Much beyond that and the network is thin rather than the work parallel.
+        if (chosen.Count > 3 && unsequenced > 3 && unsequenced > chosen.Count * 0.15 && links > 0)
+        {
+            notes.Add(
+                $"{unsequenced} of {chosen.Count} activities have nothing scheduled before them, so "
+                + "that many trades all begin on the project start date. The source schedules sequence "
+                + "each activity against itself, unit after unit, but not against the trades around "
+                + "it — which is why this draft has finishes running alongside the structure they sit "
+                + "on. Link the trades with links_write, or learn from schedules whose logic already "
+                + "says which trade waits for which.");
+        }
+
         if (links == 0 && chosen.Count > 1)
         {
             notes.Add(

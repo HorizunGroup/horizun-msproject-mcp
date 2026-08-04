@@ -306,6 +306,42 @@ def main() -> int:
                   f"400 m2 at 40/day = 10d, got {dmam['duration'] if dmam else '?'}")
             client.call("project_save", handle=dup["handle"], op="close", discardChanges=True)
 
+        # A library learned from thinly-linked sources produces a draft where whole trades begin
+        # on day one. That is faithful to the source and useless as a programme, so it has to be
+        # said out loud rather than left for someone to notice on the Gantt.
+        thin = workdir / "thin.xml"
+        h = client.call("project_open", path=str(thin), create=True, startDate="2024-01-08")["handle"]
+        trades = ["Estructura", "Mamposteria", "Enchapes", "Ventaneria", "Aparatos", "Pintura"]
+        client.call("tasks_write", handle=h, ops=[
+            {"op": "create", "name": f"{trade} apto {unit}0{unit}", "duration": "3d"}
+            for unit in (1, 2, 3) for trade in trades])
+        u = {t["name"]: t["uid"] for t in client.call("tasks_query", handle=h, limit=60)["items"]}
+        # Each trade chains only to itself, unit after unit — no trade waits for another.
+        client.call("links_write", handle=h, ops=[
+            {"op": "link", "from": u[f"{trade} apto {unit-1}0{unit-1}"],
+             "to": u[f"{trade} apto {unit}0{unit}"]}
+            for trade in trades for unit in (2, 3)])
+        client.call("project_save", handle=h, op="save")
+        client.call("project_save", handle=h, op="close")
+
+        thin_lib = workdir / "thin-library.json"
+        tl = client.call("schedule_learn", paths=[str(thin)], savePath=str(thin_lib),
+                         minOccurrences=2)
+        check("a library learned from self-chained sources reports its cross-logic count",
+              tl.get("activitiesWithCrossLogic") == 0,
+              f"{tl.get('activitiesWithCrossLogic')} of {len(tl['activities'])}")
+        check("and warns the draft will start every trade at once",
+              any("same day" in n or "start most trades" in n for n in tl.get("notes", [])),
+              json.dumps(tl.get("notes"))[:140])
+
+        thin_gen = client.call("schedule_generate", libraryPath=str(thin_lib),
+                               outputPath=str(workdir / "thin-draft.xml"),
+                               startDate="2027-01-04", units=4, unitLabel="apto")
+        check("the generated draft names how many trades nothing precedes",
+              any("nothing scheduled before them" in n for n in thin_gen.get("notes", [])),
+              json.dumps(thin_gen.get("notes"))[-170:])
+        client.call("project_save", handle=thin_gen["handle"], op="close", discardChanges=True)
+
         # ------------------------------------------------------------- generate
         print("\n== schedule_generate ==")
         gen = client.call("schedule_generate", libraryPath=str(lib_path),
