@@ -99,10 +99,27 @@ public static class ScheduleLibrary
         // Quantities come from the model, not the schedule: construction programmes almost never
         // carry them, which is why productivity cannot be learned from durations alone. Element
         // exports are keyed by the same code the schedule uses, so the two join on it.
-        var (quantityByCode, unitByCode) = LoadQuantities(quantitySources, notes);
+        //
+        // Crucially they are read PER PROJECT. Totalling them across projects and dividing by one
+        // project's duration inflates every rate by however many projects were supplied — measured
+        // at 1.8x on two — and a rate that wrong is worse than no rate at all.
+        var quantitySets = LoadQuantitiesPerSource(quantitySources, notes);
+        var pairByIndex = quantitySets.Count == paths.Count && quantitySets.Count > 1;
 
-        foreach (var path in paths)
+        if (quantitySets.Count > 1 && !pairByIndex)
         {
+            notes.Add(
+                $"{quantitySets.Count} quantity source(s) were given for {paths.Count} schedule(s). "
+                + "They cannot be paired one to one, so each code takes the median across sources "
+                + "rather than a total. Supply one export per schedule, in the same order, for rates "
+                + "measured against the project they belong to.");
+        }
+
+        for (var sourceIndex = 0; sourceIndex < paths.Count; sourceIndex++)
+        {
+            var path = paths[sourceIndex];
+            var (quantityByCode, unitByCode) = ResolveQuantities(quantitySets, sourceIndex, pairByIndex);
+
             ProjectFile project;
             try
             {
@@ -405,19 +422,21 @@ public static class ScheduleLibrary
     /// Reads element exports and totals the quantity behind each code, so an activity's
     /// productivity can be measured against the work it actually covered.
     /// </summary>
-    private static (Dictionary<string, double>, Dictionary<string, string>) LoadQuantities(
-        IReadOnlyList<string>? sources, List<string> notes)
+    private static List<(Dictionary<string, double> Quantity, Dictionary<string, string> Unit)>
+        LoadQuantitiesPerSource(IReadOnlyList<string>? sources, List<string> notes)
     {
-        var totals = new Dictionary<string, double>(StringComparer.Ordinal);
-        var units = new Dictionary<string, string>(StringComparer.Ordinal);
+        var sets = new List<(Dictionary<string, double>, Dictionary<string, string>)>();
 
         if (sources is null || sources.Count == 0)
         {
-            return (totals, units);
+            return sets;
         }
 
         foreach (var source in sources)
         {
+            var totals = new Dictionary<string, double>(StringComparer.Ordinal);
+            var units = new Dictionary<string, string>(StringComparer.Ordinal);
+
             try
             {
                 foreach (var element in Bim.BimLinkStore.LoadElements(Path.GetFullPath(source)))
@@ -427,6 +446,7 @@ public static class ScheduleLibrary
                         continue;
                     }
 
+                    // Summing WITHIN one export is right: an activity covers many elements.
                     var code = element.Code.Trim().ToUpperInvariant();
                     totals[code] = totals.GetValueOrDefault(code) + element.Quantity.Value;
                     if (!string.IsNullOrWhiteSpace(element.Unit))
@@ -439,17 +459,69 @@ public static class ScheduleLibrary
             {
                 notes.Add($"Could not read quantities from '{source}': {ex.Message}");
             }
+
+            sets.Add((totals, units));
         }
 
-        if (totals.Count > 0)
+        var codes = sets.SelectMany(x => x.Item1.Keys).Distinct().Count();
+        if (codes > 0)
         {
             notes.Add(
-                $"Quantities loaded for {totals.Count} code(s). Activities that match one report a "
-                + "productivity rate, so a future schedule can be sized from measured quantities "
-                + "rather than from a duration somebody typed.");
+                $"Quantities loaded for {codes} code(s) across {sets.Count} export(s). Activities that "
+                + "match one report a productivity rate, so a future schedule can be sized from "
+                + "measured quantities rather than from a duration somebody typed.");
         }
 
-        return (totals, units);
+        return sets;
+    }
+
+    /// <summary>
+    /// The quantities that belong with one schedule. Paired by position where an export was given
+    /// per schedule; otherwise the median across exports, which at least does not scale with how
+    /// many were supplied.
+    /// </summary>
+    private static (Dictionary<string, double>, Dictionary<string, string>) ResolveQuantities(
+        List<(Dictionary<string, double> Quantity, Dictionary<string, string> Unit)> sets,
+        int index, bool pairByIndex)
+    {
+        if (sets.Count == 0)
+        {
+            return (new Dictionary<string, double>(StringComparer.Ordinal),
+                    new Dictionary<string, string>(StringComparer.Ordinal));
+        }
+
+        if (pairByIndex)
+        {
+            return (sets[index].Quantity, sets[index].Unit);
+        }
+
+        if (sets.Count == 1)
+        {
+            return (sets[0].Quantity, sets[0].Unit);
+        }
+
+        var merged = new Dictionary<string, double>(StringComparer.Ordinal);
+        var units = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var code in sets.SelectMany(s => s.Quantity.Keys).Distinct(StringComparer.Ordinal))
+        {
+            var values = sets
+                .Where(s => s.Quantity.ContainsKey(code))
+                .Select(s => s.Quantity[code])
+                .OrderBy(v => v)
+                .ToList();
+
+            merged[code] = values[values.Count / 2];
+
+            var unit = sets.Select(s => s.Unit.GetValueOrDefault(code))
+                .FirstOrDefault(u => !string.IsNullOrWhiteSpace(u));
+            if (unit is not null)
+            {
+                units[code] = unit;
+            }
+        }
+
+        return (merged, units);
     }
 
     private sealed class Sample

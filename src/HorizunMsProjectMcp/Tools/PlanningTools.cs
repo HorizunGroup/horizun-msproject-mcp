@@ -155,7 +155,12 @@ public static class PlanningTools
         var start = QueryTools.ParseDate(startDate)
                     ?? throw new McpToolException("A start date is required, as yyyy-MM-dd.");
 
-        var byKey = library.Activities.ToDictionary(a => a.Key, StringComparer.Ordinal);
+        // A library written by an older build, or hand-edited, can repeat a key; take the
+        // best-evidenced entry rather than throwing on the duplicate.
+        var byKey = library.Activities
+            .GroupBy(a => a.Key, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(a => a.Occurrences).First(),
+                StringComparer.Ordinal);
         var unmatched = new List<string>();
 
         List<ActivityEntry> chosen;
@@ -218,10 +223,20 @@ public static class PlanningTools
         }
 
         var byQuantity = new List<string>();
-        var normalisedQuantities = quantities is null
-            ? new Dictionary<string, double>(StringComparer.Ordinal)
-            : quantities.ToDictionary(
-                kv => ScheduleLibrary.Normalise(kv.Key), kv => kv.Value, StringComparer.Ordinal);
+
+        // Several supplied labels can normalise to the same activity key — real budgets are full of
+        // near-duplicate descriptions — so total them rather than letting a duplicate key throw.
+        var normalisedQuantities = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var (label, quantity) in quantities ?? new Dictionary<string, double>())
+        {
+            var key = ScheduleLibrary.Normalise(label);
+            if (key.Length == 0)
+            {
+                continue;
+            }
+
+            normalisedQuantities[key] = normalisedQuantities.GetValueOrDefault(key) + quantity;
+        }
 
         foreach (var entry in chosen)
         {
@@ -387,6 +402,15 @@ public static class PlanningTools
         if (unmatched.Count > 0)
         {
             notes.Add($"{unmatched.Count} requested activity(ies) are not in the library and were skipped.");
+        }
+
+        if (links == 0 && chosen.Count > 1)
+        {
+            notes.Add(
+                "Not one dependency could be recreated: the schedules this library was learned from "
+                + "carry no logic between these activities, so there is none to copy. The draft is a "
+                + "list of dated work, not a network — link it with links_write, or learn from "
+                + "schedules that are themselves properly sequenced.");
         }
 
         if (byQuantity.Count > 0)

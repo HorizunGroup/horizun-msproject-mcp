@@ -260,6 +260,52 @@ def main() -> int:
               json.dumps(sized.get("notes"))[-150:])
         client.call("project_save", handle=sized["handle"], op="close", discardChanges=True)
 
+        # Rates are measured per project. Totalling quantities across projects and dividing by
+        # one project's duration inflated every rate by the number of projects supplied —
+        # measured at 1.8x on two, which is worse than having no rate at all.
+        two_elements = workdir / "cantidades-b.csv"
+        two_elements.write_text(
+            "elementId,code,quantity,unit\n"
+            "1,MAM-01,120,m2\n"
+            "2,MAM-01,120,m2\n"
+            "3,ENC-01,60,m2\n", encoding="utf-8")
+
+        paired = client.call("schedule_learn",
+                             paths=[str(workdir / "obra-2024.xml"), str(workdir / "obra-2025.xml")],
+                             codeField="Text1",
+                             quantitySources=[str(elements), str(two_elements)],
+                             minOccurrences=2)
+        paired_rates = {a["key"]: a.get("productivityPerDay") for a in paired["activities"]}
+        check("one export per schedule keeps the rate per project, not multiplied by their number",
+              paired_rates.get("MAMPOSTERIA APTO") == 40,
+              f"still 40/day with two exports, got {paired_rates.get('MAMPOSTERIA APTO')}")
+
+        mismatched = client.call("schedule_learn",
+                                 paths=[str(workdir / "obra-2024.xml")],
+                                 codeField="Text1",
+                                 quantitySources=[str(elements), str(two_elements)],
+                                 minOccurrences=2)
+        check("exports that cannot be paired take the median rather than a total",
+              {a["key"]: a.get("productivityPerDay") for a in
+               mismatched["activities"]}.get("MAMPOSTERIA APTO") == 40)
+        check("and it says why", any("median across sources" in n for n in mismatched.get("notes", [])),
+              json.dumps(mismatched.get("notes"))[:130])
+
+        # Real budgets repeat near-identical descriptions; two that normalise alike must not throw.
+        dup = client.call("schedule_generate", libraryPath=str(lib2_path),
+                          outputPath=str(workdir / "dup.xml"), startDate="2027-01-04",
+                          units=1, quantities={"Mamposteria apto 101": 200,
+                                               "MAMPOSTERIA APTO 202": 200})
+        check("labels that normalise to the same activity are totalled, not a crash",
+              "__error__" not in dup, str(dup.get("__error__"))[:110])
+        if "__error__" not in dup:
+            drows = client.call("tasks_query", handle=dup["handle"], limit=20)["items"]
+            dmam = next((t for t in drows if "Mamposteria" in str(t["name"])), None)
+            check("and the totalled quantity sizes the task",
+                  dmam is not None and dmam["duration"] == "10d",
+                  f"400 m2 at 40/day = 10d, got {dmam['duration'] if dmam else '?'}")
+            client.call("project_save", handle=dup["handle"], op="close", discardChanges=True)
+
         # ------------------------------------------------------------- generate
         print("\n== schedule_generate ==")
         gen = client.call("schedule_generate", libraryPath=str(lib_path),
