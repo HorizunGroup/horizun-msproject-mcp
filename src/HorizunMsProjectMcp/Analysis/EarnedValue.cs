@@ -6,6 +6,13 @@ namespace Horizun.ProjectMcp.Analysis;
 public sealed record EvmMetrics
 {
     public required string Scope { get; init; }
+
+    /// <summary>
+    /// What the numbers are denominated in: "cost" where the schedule carries costs, "work_hours"
+    /// where it does not. Most construction schedules track hours and no money at all, and earned
+    /// value in hours is standard practice — reporting zeros instead would be useless.
+    /// </summary>
+    public required string Measure { get; init; }
     public string? Label { get; init; }
     public int? Uid { get; init; }
     public required int Tasks { get; init; }
@@ -75,6 +82,24 @@ public static class EarnedValue
         var leaves = ScheduleAnalyzer.Leaves(project).ToList();
         var notes = new List<string>();
 
+        // Value has to be denominated in something the schedule actually carries. Fall through
+        // cost, then loaded hours, then duration — plenty of real schedules hold neither money nor
+        // resource-loaded work, and weighting by duration is the standard method for those. It is
+        // the difference between a usable report and a column of zeros.
+        var hasCost = leaves.Any(t => (t.Cost ?? 0) > 0 || (BaselineCost(t, baselineNumber) ?? 0) > 0);
+        var hasWork = leaves.Any(t => (MpxjMapper.Hours(t.Work) ?? 0) > 0);
+        var measure = hasCost ? "cost" : hasWork ? "work_hours" : "duration_days";
+
+        if (!hasCost)
+        {
+            notes.Add(hasWork
+                ? "This schedule carries no costs, so earned value is measured in work hours instead. "
+                  + "SPI and the variances read the same way; the currency figures simply are not there."
+                : "This schedule carries neither costs nor loaded work, so earned value is weighted by "
+                  + "task duration instead — a standard method, and the only one this schedule supports. "
+                  + "SPI reads normally. CPI is null because actual effort is not recorded anywhere.");
+        }
+
         var withBaseline = leaves.Count(t => BaselineFinish(t, baselineNumber) is not null);
         if (withBaseline == 0)
         {
@@ -83,7 +108,7 @@ public static class EarnedValue
                 + "schedule variance will read as zero. Save a baseline to get meaningful numbers.");
         }
 
-        var projectMetrics = Compute(leaves, statusDate, baselineNumber, "project", null, null);
+        var projectMetrics = Compute(leaves, statusDate, baselineNumber, measure, "project", null, null);
 
         List<EvmMetrics>? branches = null;
         if (byBranch)
@@ -95,9 +120,17 @@ public static class EarnedValue
                 if (descendants.Count > 0)
                 {
                     branches.Add(Compute(
-                        descendants, statusDate, baselineNumber, "branch", summary.Name, summary.UniqueID));
+                        descendants, statusDate, baselineNumber, measure, "branch",
+                        summary.Name, summary.UniqueID));
                 }
             }
+        }
+
+        if (projectMetrics.Bac <= 0)
+        {
+            notes.Add(
+                "The tasks carry no cost, no work and no duration, so there is nothing to earn value "
+                + "against at all.");
         }
 
         var worst = leaves
@@ -133,14 +166,21 @@ public static class EarnedValue
 
     private static EvmMetrics Compute(
         IReadOnlyList<MPXJ.Net.Task> tasks, DateTime statusDate, int baselineNumber,
-        string scope, string? label, int? uid)
+        string measure, string scope, string? label, int? uid)
     {
         double bcws = 0, bcwp = 0, acwp = 0, bac = 0;
 
         foreach (var task in tasks)
         {
-            // Budget for this task: the baseline cost where one exists, otherwise the current plan.
-            var budget = BaselineCost(task, baselineNumber) ?? task.Cost ?? 0;
+            // Budget for this task: the baseline value where one exists, otherwise the current plan.
+            var budget = measure switch
+            {
+                "cost" => BaselineCost(task, baselineNumber) ?? task.Cost ?? 0,
+                "work_hours" => MpxjMapper.Hours(BaselineWork(task, baselineNumber))
+                                ?? MpxjMapper.Hours(task.Work) ?? 0,
+                _ => MpxjMapper.Days(BaselineDuration(task, baselineNumber))
+                     ?? MpxjMapper.Days(task.Duration) ?? 0,
+            };
             bac += budget;
 
             // BCWS — the share of the budget the plan said should be earned by the status date.
@@ -152,13 +192,22 @@ public static class EarnedValue
             var percent = (task.PercentageComplete ?? 0) / 100.0;
             bcwp += budget * Math.Clamp(percent, 0, 1);
 
-            // ACWP — what was actually spent.
-            acwp += task.ActualCost ?? (budget * Math.Clamp(percent, 0, 1));
+            // ACWP — what was actually spent or worked. A duration-weighted schedule keeps no
+            // independent record of effort, so cost performance is simply not observable there and
+            // ACWP collapses onto earned value.
+            var actual = measure switch
+            {
+                "cost" => task.ActualCost,
+                "work_hours" => MpxjMapper.Hours(task.ActualWork),
+                _ => null,
+            };
+            acwp += actual ?? (budget * Math.Clamp(percent, 0, 1));
         }
 
         return new EvmMetrics
         {
             Scope = scope,
+            Measure = measure,
             Label = label,
             Uid = uid,
             Tasks = tasks.Count,
@@ -218,6 +267,9 @@ public static class EarnedValue
 
     private static MPXJ.Net.Duration? BaselineWork(MPXJ.Net.Task t, int n) =>
         n == 0 ? t.BaselineWork : SafeRef(() => t.GetBaselineWork(n));
+
+    private static MPXJ.Net.Duration? BaselineDuration(MPXJ.Net.Task t, int n) =>
+        n == 0 ? t.BaselineDuration : SafeRef(() => t.GetBaselineDuration(n));
 
     private static T? Safe<T>(Func<T?> read) where T : struct
     {

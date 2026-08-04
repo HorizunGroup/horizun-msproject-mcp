@@ -149,7 +149,11 @@ public static class WriteEngine
 
         var after = Snapshot.Capture(target);
 
-        if (!dryRun && applied > 0)
+        // Mark the document dirty whenever the model was touched at all — not only when every
+        // check passed. A batch that mutated something and then failed verification still leaves
+        // the file different from what is on disk, and a clean flag would make the next write trip
+        // the changed-on-disk guard with an error about the wrong problem.
+        if (!dryRun && (applied > 0 || rejected.Count > 0))
         {
             session.Dirty = true;
         }

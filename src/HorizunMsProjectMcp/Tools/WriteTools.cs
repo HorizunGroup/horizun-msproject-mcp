@@ -162,8 +162,10 @@ public static class WriteTools
                         }
 
                         var created = parent is null ? project.AddTask() : parent.AddTask();
+                        EnsureUniqueId(project, created);
                         created.Name = op.Name ?? "New task";
                         ApplyFields(created, op, rejected, current, isNew: true);
+                        GiveDatesIfMissing(project, created);
 
                         var newUid = created.UniqueID;
                         var expectedName = created.Name;
@@ -301,6 +303,62 @@ public static class WriteTools
 
             return pending;
         });
+    }
+
+    /// <summary>
+    /// Gives a newly added task a unique id when the library did not.
+    /// </summary>
+    /// <remarks>
+    /// MPXJ assigns one automatically in a project built from scratch but not in one read from a
+    /// file, so a task added to an existing schedule came out with no identity: invisible to every
+    /// query, unaddressable by any write, and silently changing the task count. Adding work to a
+    /// schedule somebody sent you is a core use case, and it was broken.
+    /// </remarks>
+    private static void EnsureUniqueId(ProjectFile project, MPXJ.Net.Task task)
+    {
+        if (task.UniqueID is > 0)
+        {
+            return;
+        }
+
+        var next = project.Tasks.Select(t => t.UniqueID ?? 0).DefaultIfEmpty(0).Max() + 1;
+        task.UniqueID = next;
+
+        if (task.ID is null)
+        {
+            task.ID = project.Tasks.Select(t => t.ID ?? 0).DefaultIfEmpty(0).Max() + 1;
+        }
+    }
+
+    /// <summary>
+    /// Gives a brand-new task dates when nothing else has.
+    /// </summary>
+    /// <remarks>
+    /// An imported schedule is deliberately never rescheduled, so a task added to one would
+    /// otherwise come back with no start and no finish — invisible on a Gantt, useless to every
+    /// analysis, and puzzling to whoever added it. This dates the new task alone, on its own
+    /// calendar, and touches nothing else in the schedule.
+    /// </remarks>
+    private static void GiveDatesIfMissing(ProjectFile project, MPXJ.Net.Task task)
+    {
+        if (task.Start is not null && task.Finish is not null)
+        {
+            return;
+        }
+
+        var calendar = new Analysis.CalendarSet(project).For(task);
+        var anchor = task.Start
+                     ?? task.ConstraintDate
+                     ?? project.ProjectProperties.StatusDate
+                     ?? project.ProjectProperties.StartDate
+                     ?? DateTime.Today;
+
+        var start = calendar.NextWorkingDay(anchor);
+        var days = MpxjMapper.Days(task.Duration, calendar.HoursPerDay) ?? 0;
+
+        task.Start = Analysis.WorkingCalendar.AtStart(start);
+        task.Finish = Analysis.WorkingCalendar.AtFinish(
+            days <= 0 ? start : calendar.AddWorkingDays(start, days));
     }
 
     private static void ApplyFields(

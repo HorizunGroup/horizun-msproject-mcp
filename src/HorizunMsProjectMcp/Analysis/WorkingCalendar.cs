@@ -113,14 +113,34 @@ public sealed class WorkingCalendar
     /// <summary>Which weekdays this calendar treats as working.</summary>
     public IReadOnlyList<string> WorkingDaysOfWeek()
     {
-        // Probe a real week rather than reading the day-type table, so exceptions and any
-        // quirk of how the file stores its pattern are reflected in the answer.
+        // Probe several weeks and take the majority verdict per weekday. Sampling a single week
+        // gets the answer wrong whenever a holiday happens to fall in it — which reported a
+        // six-day site calendar as a five-day one, the sort of quiet error that makes a
+        // diagnostic worse than none.
+        const int weeks = 8;
+
         var monday = DateTime.Today;
-        while (monday.DayOfWeek != DayOfWeek.Monday) monday = monday.AddDays(1);
+        while (monday.DayOfWeek != DayOfWeek.Monday)
+        {
+            monday = monday.AddDays(1);
+        }
+
+        var working = new int[7];
+        for (var w = 0; w < weeks; w++)
+        {
+            for (var d = 0; d < 7; d++)
+            {
+                var day = monday.AddDays(w * 7 + d);
+                if (IsWorking(day))
+                {
+                    working[(int)day.DayOfWeek]++;
+                }
+            }
+        }
 
         return Enumerable.Range(0, 7)
             .Select(i => monday.AddDays(i))
-            .Where(IsWorking)
+            .Where(d => working[(int)d.DayOfWeek] * 2 > weeks)
             .Select(d => d.DayOfWeek.ToString())
             .ToList();
     }

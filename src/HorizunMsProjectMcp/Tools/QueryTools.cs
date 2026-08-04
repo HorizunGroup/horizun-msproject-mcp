@@ -461,7 +461,11 @@ public static class QueryTools
         + "and tells you to coarsen the granularity instead of quietly returning tens of thousands of rows.")]
     public static TimephasedResult TimephasedQuery(
         [Description("Document handle from project_open.")] string handle,
-        [Description("'work' (default), 'cost', 'baseline_work', or 'baseline_cost'.")] string measure = "work",
+        [Description(
+            "'work' (default), 'cost', 'duration', 'baseline_work', or 'baseline_cost'. Use 'duration' "
+            + "on a schedule with no loaded hours or costs — many carry neither, and it is the only "
+            + "curve they can produce.")]
+        string measure = "work",
         [Description("'day', 'week' (default), or 'month'.")] string granularity = "week",
         [Description("Restrict to these task uids. Omit for the whole project.")] int[]? uids = null,
         [Description("Range start, yyyy-MM-dd. Defaults to the project start.")] string? from = null,
@@ -517,6 +521,7 @@ public static class QueryTools
                 "cost" => task.Cost ?? 0,
                 "baseline_cost" => task.BaselineCost ?? 0,
                 "baseline_work" => MpxjMapper.Hours(task.BaselineWork) ?? 0,
+                "duration" => MpxjMapper.Days(task.Duration) ?? 0,
                 _ => MpxjMapper.Hours(task.Work) ?? 0,
             };
 
@@ -566,8 +571,11 @@ public static class QueryTools
         if (series.Count == 0)
         {
             notes.Add(
-                $"Nothing to spread: no task in range carries a '{measure}' value. "
-                + "Assign resources or costs first.");
+                $"Nothing to spread: no task in range carries a '{measure}' value."
+                + (measure.Contains("work") || measure.Contains("cost")
+                    ? " This schedule most likely has no loaded hours or costs — try measure='duration', "
+                      + "which weights the curve by task duration instead."
+                    : string.Empty));
         }
 
         notes.Add(

@@ -53,7 +53,9 @@ only, because it shifts the moment a task is inserted and addressing by it edits
 
 Computed server-side, so the agent asks a question instead of pulling two thousand tasks into
 context. Critical path, float distribution, driving path, day-by-day overallocation, DCMA-14, and
-full earned value (BCWS/BCWP/ACWP, SPI, CPI, EAC, TCPI).
+full earned value (BCWS/BCWP/ACWP, SPI, CPI, EAC, TCPI) — denominated in cost where the schedule
+carries costs, in work hours where it carries hours, and weighted by duration where it carries
+neither, which is most of them. The report says which.
 
 **Writing** — `tasks_write` · `links_write` · `resources_write` · `calendars_write` · `schedule_update`
 
@@ -163,12 +165,12 @@ can do.
 
 ```bash
 cd src/HorizunMsProjectMcp && dotnet build && cd ../..
-python tools/acceptance-test.py   # 57 checks, all 20 tools end to end
-python tools/scheduler-test.py    # 34 checks, critical-path engine correctness
+python tools/acceptance-test.py   # 65 checks, all 20 tools end to end
+python tools/scheduler-test.py    # 37 checks, critical-path engine correctness
 python tools/smoke-test.py        # 13 checks, environment and capabilities
 ```
 
-**104 checks**, driven over real JSON-RPC against the running server.
+**115 checks**, driven over real JSON-RPC against the running server.
 
 The acceptance suite builds a construction schedule from nothing and asserts the contracts above:
 that a dry run commits nothing, that a cycle is refused before it is applied, that a write to an
@@ -183,8 +185,9 @@ full round trips through Primavera XER and PMXML and through a real binary `.mpp
 written by Microsoft Project itself, read back by MPXJ, with dates, milestone flags, budget codes
 and dependencies all intact.
 
-Beyond the suites, the server has been run against production construction schedules of up to
-7,000 tasks and 170 MB.
+Beyond the suites, the server has been driven through a planner's full working cycle on a
+production 5,985-task construction schedule — open, audit, baseline, record progress, measure
+earned value, export the Power BI dataset — and read against files of up to 7,000 tasks and 170 MB.
 
 Rebuild the installable package with `dotnet pack -c Release`.
 
@@ -210,8 +213,8 @@ src/HorizunMsProjectMcp/
   Bim/           element matching and the 4D bridge
   Tools/         the 20 MCP tools
 tools/
-  acceptance-test.py   end-to-end across all 20 tools, 57 checks
-  scheduler-test.py    critical-path engine correctness + format round trips, 34 checks
+  acceptance-test.py   end-to-end across all 20 tools, 65 checks
+  scheduler-test.py    critical-path engine correctness + format round trips, 37 checks
   smoke-test.py        environment and capability matrix, 13 checks
 ```
 

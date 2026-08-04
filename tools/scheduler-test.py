@@ -338,6 +338,21 @@ def main() -> int:
               any("not recalculated" in n.lower() for n in w.get("notes", [])),
               json.dumps(w.get("notes"))[:140])
 
+        # Adding work to a schedule somebody else built is a core use case, and MPXJ does not
+        # assign unique ids to tasks added to a file it read from disk.
+        added = client.call("tasks_write", handle=reopened, ops=[
+            {"op": "create", "name": "Actividad añadida", "duration": "4d"}])
+        rows = client.call("tasks_query", handle=reopened, limit=50)["items"]
+        fresh = [x for x in rows if x["name"] == "Actividad añadida"]
+        check("a task can be added to an imported schedule",
+              added["applied"] == 1 and len(fresh) == 1,
+              f"applied={added['applied']} rejected={json.dumps(added['rejected'])[:90]}")
+        check("and it gets a usable uid rather than vanishing",
+              bool(fresh) and fresh[0]["uid"] > 0,
+              f"uid={fresh[0]['uid'] if fresh else 'missing'}")
+        check("a later write is not blocked by a stale fingerprint",
+              "__error__" not in client.call("schedule_update", handle=reopened, op="save_baseline"))
+
         rec = client.call("schedule_update", handle=reopened, op="recalculate")
         check("asking for a recalculation warns before replacing those dates",
               any("microsoft project" in r["reason"].lower() for r in rec.get("rejected", [])),

@@ -314,17 +314,23 @@ public static class Dcma14
             fatMilestones.Count, total, 0,
             fatMilestones, "A milestone marks an instant. Give it zero duration or make it a normal task.");
 
-        // Duplicate names make progress reporting ambiguous.
-        var duplicates = leaves
+        // Duplicate names, but only among siblings. Repetition across the WBS is how construction
+        // schedules are built — "Estructura apto 101" appears once per apartment and that is
+        // correct. Flagging those would fire on almost every real schedule and drown the findings
+        // that matter. Two tasks with the same name under the *same* parent is the genuine defect:
+        // nobody can tell which one a progress report refers to.
+        var siblingDuplicates = leaves
             .Where(t => !string.IsNullOrWhiteSpace(t.Name))
-            .GroupBy(t => t.Name!.Trim(), StringComparer.OrdinalIgnoreCase)
+            .GroupBy(t => (Parent: t.ParentTask?.UniqueID ?? -1, Name: t.Name!.Trim().ToUpperInvariant()))
             .Where(g => g.Count() > 1)
             .SelectMany(g => g)
             .ToList();
         yield return Ratio(
-            "hrz_duplicate_names", "Tasks sharing a name with another task",
-            duplicates.Count, total, 5,
-            duplicates, "Qualify the names by location or system so progress reports are unambiguous.");
+            "hrz_duplicate_names", "Tasks sharing a name with a sibling under the same parent",
+            siblingDuplicates.Count, total, 5,
+            siblingDuplicates,
+            "Qualify these by location or system — a progress report cannot distinguish them. "
+            + "Repeating a name across different branches of the WBS is fine and is not counted here.");
 
         // Unnamed tasks.
         var unnamed = leaves.Where(t => string.IsNullOrWhiteSpace(t.Name)).ToList();

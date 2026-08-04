@@ -218,6 +218,7 @@ def main() -> int:
         check("all 14 DCMA checks ran", len(dcma) == 14, f"got {len(dcma)}: {sorted(dcma)}")
         check("Horizun rules ran too", any(r.startswith("hrz_") for r in rules))
 
+
         cpt = next(f for f in qa["findings"] if f["rule"] == "dcma_12_critical_path_test")
         check("the Critical Path Test actually injects a delay and measures the result",
               cpt.get("evaluated") is True and cpt.get("measured") is not None,
@@ -249,10 +250,35 @@ def main() -> int:
         check("no task is scheduled to start on a weekend",
               all(date.fromisoformat(t["start"][:10]).weekday() < 5 for t in working if t["start"]))
 
+        # Construction schedules repeat task names across the WBS by design — one set per
+        # apartment, per floor, per block. Flagging those would fire on almost every real
+        # schedule and bury the findings that matter. Done after the engine checks, since adding
+        # a task to an imported schedule deliberately leaves it unscheduled.
+        client.call("tasks_write", handle=handle, ops=[
+            {"op": "create", "name": "Estructura N+4", "duration": "0"}])
+        other_branch = next(x["uid"] for x in
+                            client.call("tasks_query", handle=handle, limit=100)["items"]
+                            if x["name"] == "Estructura N+4")
+        client.call("tasks_write", handle=handle, ops=[
+            {"op": "create", "name": "Encofrado losa", "duration": "3d", "parentUid": other_branch}])
+        requalified = client.call("schedule_qa", handle=handle, statusDate="2026-09-15")
+        dup = next(f for f in requalified["findings"] if f["rule"] == "hrz_duplicate_names")
+        check("repeating a task name in another branch of the WBS is not flagged",
+              dup.get("passed") is True, dup["summary"])
+
+        # But two with the same name under the same parent genuinely is ambiguous.
+        client.call("tasks_write", handle=handle, ops=[
+            {"op": "create", "name": "Encofrado losa", "duration": "3d", "parentUid": other_branch}])
+        siblings = client.call("schedule_qa", handle=handle, statusDate="2026-09-15")
+        dup2 = next(f for f in siblings["findings"] if f["rule"] == "hrz_duplicate_names")
+        check("two siblings sharing a name are flagged", dup2.get("passed") is False, dup2["summary"])
+        check("a task added to an imported schedule still gets dates",
+              all(x.get("start") for x in client.call("tasks_query", handle=handle, limit=50)["items"]))
+
         # ------------------------------------------------------- baseline and EVM
         print("\n== baseline and earned value ==")
         base = client.call("schedule_update", handle=handle, op="save_baseline", baseline=0)
-        check("baseline saved", base["applied"] == 1, json.dumps(base["rejected"]))
+        check("baseline saved", base.get("applied") == 1, json.dumps(base)[:300])
 
         client.call("tasks_write", handle=handle, ops=[
             {"op": "update", "uid": by_name["Encofrado losa"], "percentComplete": 100,
@@ -265,10 +291,27 @@ def main() -> int:
         check("EVM produces the standard metrics",
               all(k in evm["project"] for k in ("bcws", "bcwp", "acwp", "bac")))
 
-        curve = client.call("timephased_query", handle=handle, measure="work", granularity="week")
+        check("EVM names the unit it measured in",
+              evm["project"].get("measure") in {"cost", "work_hours", "duration_days"},
+              str(evm["project"].get("measure")))
+        check("a schedule with no costs still produces a budget to earn against",
+              evm["project"]["bac"] > 0,
+              f"measure={evm['project'].get('measure')} bac={evm['project']['bac']}")
+        check("and says which fallback it used",
+              any("duration" in n.lower() or "work hours" in n.lower() for n in evm.get("notes", [])),
+              json.dumps(evm.get("notes"))[:120])
+
+        curve = client.call("timephased_query", handle=handle, measure="duration", granularity="week")
+        check("the S-curve works on a schedule with no loaded hours",
+              curve["buckets"] > 0, f"{curve['buckets']} buckets")
         check("the S-curve is cumulative and monotonic",
               all(b["value"] >= a["value"] for a, b in
                   zip(curve["cumulative"], curve["cumulative"][1:])) if curve["cumulative"] else True)
+
+        empty = client.call("timephased_query", handle=handle, measure="work", granularity="week")
+        check("an empty curve suggests the measure that would work",
+              empty["buckets"] > 0 or any("duration" in n for n in empty.get("notes", [])),
+              json.dumps(empty.get("notes"))[:110])
 
         # -------------------------------------------- verified writes and dry run
         print("\n== the write contract ==")
