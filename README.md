@@ -24,18 +24,20 @@ with `dotnet tool install -g --add-source ./nupkg HorizunMsProjectMcp`.)*
 
 There are a handful of Microsoft Project MCP servers. Every one of them requires Java, or a
 licensed Microsoft Project install, or a paid JDBC driver — and on the machine this was built on,
-**none of them would start**. Four things here are not available anywhere else:
+**none of them would start**. Six things here are not available anywhere else:
 
 | | |
 |---|---|
 | **Zero prerequisites** | A single .NET binary. MPXJ is compiled to .NET through IKVM, so there is no JVM anywhere in the picture, and no Microsoft Project either. |
 | **Verified writes** | Microsoft Project silently ignores writes all the time — auto-scheduled dates, hard constraints, summary rollups, calculated costs. Nothing here is reported as applied until it has been read back out of the model and matched. |
 | **DCMA 14-point assessment** | The industry standard for judging whether a schedule can be run on. The Primavera servers implement it; none of the Microsoft Project ones do. Check 12 genuinely injects a 600-day delay and measures what moves. |
+| **Reprogramming that is measured** | Recovery options are applied to a copy of the schedule, rescheduled, and reported with the finish date they actually produce. An option that recovers nothing says so instead of being offered as advice. |
+| **It learns from your past projects** | Point it at finished schedules and it reports what each activity really took and what usually precedes it, then drafts a new programme from that — one task per unit, sequenced the way the trades actually followed each other. |
 | **A BIM bridge** | Tie schedule tasks to model elements by code, turn measured quantities into duration proposals, and emit the per-element dates that drive 4D in Navisworks and the progress dashboard in Power BI. Nobody else does this at all. |
 
 ---
 
-## The 20 tools
+## The 24 tools
 
 **Session** — `project_health` · `project_open` · `project_save`
 
@@ -61,9 +63,21 @@ neither, which is most of them. The report says which.
 
 Batched, typed, verified. Cycles are refused before they are applied, with the offending chain named.
 
+**Planning** — `schedule_recovery` · `schedule_target` · `schedule_learn` · `schedule_generate`
+
+Reprogramming, measured rather than asserted. `schedule_recovery` finds what is late, ranks it by
+how much of the schedule sits behind it, then tries each recovery lever — removing lag on the
+driving chain, overlapping hand-offs, compressing the longest critical tasks — on a throwaway copy
+and reports the finish date each one genuinely produces. `schedule_target` tests a date you have
+been handed and names the work the network does not hold in place. `schedule_learn` mines finished
+schedules for how long each activity actually takes and what usually comes before it;
+`schedule_generate` turns that into a first draft, one task per apartment or floor, sequenced the
+way the history says the trades follow each other.
+
 **Interop** — `project_export` · `project_import` · `bim_link` · `bim_sync`
 
-CSV, JSON, MSPDI, native `.mpp`, and a shaped Power BI dataset. Imports plan before they write.
+CSV, JSON, MSPDI, Primavera XER and PMXML, native `.mpp`, and a shaped Power BI dataset. Imports
+plan before they write.
 
 ---
 
@@ -171,10 +185,11 @@ can do.
 cd src/HorizunMsProjectMcp && dotnet build && cd ../..
 python tools/acceptance-test.py   # 65 checks, all 20 tools end to end
 python tools/scheduler-test.py    # 45 checks, critical-path engine correctness
+python tools/planning-test.py     # 30 checks, reprogramming and learning
 python tools/smoke-test.py        # 13 checks, environment and capabilities
 ```
 
-**123 checks**, driven over real JSON-RPC against the running server.
+**153 checks**, driven over real JSON-RPC against the running server.
 
 The acceptance suite builds a construction schedule from nothing and asserts the contracts above:
 that a dry run commits nothing, that a cycle is refused before it is applied, that a write to an
@@ -220,6 +235,7 @@ src/HorizunMsProjectMcp/
 tools/
   acceptance-test.py   end-to-end across all 20 tools, 65 checks
   scheduler-test.py    engine correctness, format round trips, safety guards, 45 checks
+  planning-test.py     recovery, target dates, learning and generation, 30 checks
   smoke-test.py        environment and capability matrix, 13 checks
 ```
 
