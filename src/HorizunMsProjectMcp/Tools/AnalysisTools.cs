@@ -22,8 +22,10 @@ public static class AnalysisTools
             + "milestones, dependency_health. Omit for all except longest_path.")]
         string[]? aspects = null)
     {
-        var session = SessionStore.Get(handle);
-        return ScheduleAnalyzer.Analyze(session.File, aspects ?? Array.Empty<string>());
+        return SessionStore.Use(handle, session =>
+        {
+            return ScheduleAnalyzer.Analyze(session.File, aspects ?? Array.Empty<string>());
+    });
     }
 
     [McpServerTool(Name = "schedule_qa")]
@@ -43,15 +45,17 @@ public static class AnalysisTools
             + "task is tied to the cost model — the same code the BIM tools match on.")]
         string? budgetCodeField = null)
     {
-        var session = SessionStore.Get(handle);
-        var effective = QueryTools.ParseDate(statusDate)
-                        ?? session.File.ProjectProperties.StatusDate
-                        ?? DateTime.Today;
+        return SessionStore.Use(handle, session =>
+        {
+            var effective = QueryTools.ParseDate(statusDate)
+                            ?? session.File.ProjectProperties.StatusDate
+                            ?? DateTime.Today;
 
-        var canRecalculate = EnvironmentDoctor.Run(deep: false).Capabilities
-            .TryGetValue("recalculate", out var recalc) && recalc;
+            var canRecalculate = EnvironmentDoctor.Run(deep: false).Capabilities
+                .TryGetValue("recalculate", out var recalc) && recalc;
 
-        return Dcma14.Run(session.File, effective, canRecalculate, budgetCodeField);
+            return Dcma14.Run(session.File, effective, canRecalculate, budgetCodeField);
+    });
     }
 
     [McpServerTool(Name = "baseline_compare")]
@@ -69,16 +73,18 @@ public static class AnalysisTools
         [Description("Also break the metrics down by top-level WBS branch. Defaults to true.")]
         bool byBranch = true)
     {
-        var session = SessionStore.Get(handle);
-        var effective = QueryTools.ParseDate(statusDate)
-                        ?? session.File.ProjectProperties.StatusDate
-                        ?? DateTime.Today;
-
-        if (baseline is < 0 or > 10)
+        return SessionStore.Use(handle, session =>
         {
-            throw new McpToolException("Baseline must be between 0 and 10.");
-        }
+            var effective = QueryTools.ParseDate(statusDate)
+                            ?? session.File.ProjectProperties.StatusDate
+                            ?? DateTime.Today;
 
-        return EarnedValue.Compare(session.File, effective, baseline, byBranch);
+            if (baseline is < 0 or > 10)
+            {
+                throw new McpToolException("Baseline must be between 0 and 10.");
+            }
+
+            return EarnedValue.Compare(session.File, effective, baseline, byBranch);
+    });
     }
 }

@@ -12,3 +12,7 @@ nupkg/
 
 # Local Claude Code session state.
 .claude/
+
+# Cross-platform publish output.
+bin/
+obj/

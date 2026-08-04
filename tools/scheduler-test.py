@@ -20,7 +20,8 @@ from datetime import date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-EXE = ROOT / "src" / "HorizunMsProjectMcp" / "bin" / "Debug" / "net8.0" / "horizun-msproject-mcp.exe"
+_BIN = ROOT / "src" / "HorizunMsProjectMcp" / "bin" / "Debug" / "net8.0"
+EXE = _BIN / ("horizun-msproject-mcp.exe" if sys.platform == "win32" else "horizun-msproject-mcp")
 
 CHECKS = 0
 FAILURES: list[str] = []

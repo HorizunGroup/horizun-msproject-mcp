@@ -1,0 +1,106 @@
+name: build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    # The full suite runs here because two things only exist on Windows: writing a genuine
+    # binary .mpp through Microsoft Project, and the COM diagnosis project_health reports.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The first build translates MPXJ from Java with IKVM and takes minutes; the result
+      # is deterministic for a given MPXJ version, so it is worth caching.
+      - name: Cache NuGet and the IKVM translation
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.nuget/packages
+            src/HorizunMsProjectMcp/obj
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Build
+        run: dotnet build src/HorizunMsProjectMcp -c Debug --nologo
+
+      - name: Environment and capabilities
+        run: python tools/smoke-test.py
+
+      - name: All 25 tools, end to end
+        run: python tools/acceptance-test.py
+
+      - name: Critical-path engine and format round trips
+        run: python tools/scheduler-test.py
+
+      - name: Reprogramming, sequencing and learning
+        run: python tools/planning-test.py
+
+      - name: Concurrency and hostile input
+        run: python tools/robustness-test.py
+
+      - name: Package
+        run: dotnet pack src/HorizunMsProjectMcp -c Release --nologo
+
+  linux:
+    # The headline claim is that this needs no JVM and no Microsoft Project. This job is the
+    # evidence: a machine with neither, running everything that does not require them.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache NuGet and the IKVM translation
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.nuget/packages
+            src/HorizunMsProjectMcp/obj
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Confirm no Java is installed
+        run: |
+          if command -v java >/dev/null 2>&1; then
+            echo "A JVM is on PATH; this job is meant to prove the server does not need one."
+            java -version
+          else
+            echo "No JVM on PATH, which is the point."
+          fi
+
+      - name: Build
+        run: dotnet build src/HorizunMsProjectMcp -c Debug --nologo
+
+      - name: Environment and capabilities
+        run: python tools/smoke-test.py
+
+      - name: All 25 tools, end to end
+        run: python tools/acceptance-test.py
+
+      - name: Critical-path engine and format round trips
+        run: python tools/scheduler-test.py
+
+      - name: Reprogramming, sequencing and learning
+        run: python tools/planning-test.py
+
+      - name: Concurrency and hostile input
+        run: python tools/robustness-test.py

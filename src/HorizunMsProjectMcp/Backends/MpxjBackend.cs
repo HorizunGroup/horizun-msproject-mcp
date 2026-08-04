@@ -15,10 +15,7 @@ public static class MpxjBackend
 
     public static ProjectFile Read(string path)
     {
-        if (!File.Exists(path))
-        {
-            throw new McpToolException($"No file at '{path}'.");
-        }
+        Guard.ExistingFile(path, "path");
 
         try
         {

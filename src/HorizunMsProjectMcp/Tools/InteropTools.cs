@@ -49,7 +49,10 @@ public static class InteropTools
     public static ExportResult ProjectExport(
         [Description("Document handle from project_open.")] string handle,
         [Description("Output file path.")] string path,
-        [Description("mspdi, mpx, csv, json, or pbip_dataset.")] string format = "csv",
+        [Description(
+            "csv, json or pbip_dataset for a flat table; mspdi, mpx, mpp, xer, pmxml, planner "
+            + "or sdef for a real schedule file.")]
+        string format = "csv",
         [Description("Status date used for the earned-value block in pbip_dataset, yyyy-MM-dd.")]
         string? statusDate = null)
     {
@@ -66,6 +69,11 @@ public static class InteropTools
         {
             case "mspdi":
             case "mpx":
+            case "mpp":
+            case "xer":
+            case "pmxml":
+            case "planner":
+            case "sdef":
                 MpxjBackend.Write(project, full, format);
                 return new ExportResult { Format = format, Path = full, Rows = project.Tasks.Count };
 
@@ -140,7 +148,8 @@ public static class InteropTools
 
             default:
                 throw new McpToolException(
-                    $"Unknown format '{format}'. Use mspdi, mpx, csv, json, or pbip_dataset.");
+                    $"Unknown format '{format}'. Use csv, json, pbip_dataset, or any format project_save "
+                    + "writes: mspdi, mpx, mpp, xer, pmxml, planner, sdef.");
         }
     }
 

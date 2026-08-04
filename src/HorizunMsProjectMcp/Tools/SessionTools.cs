@@ -49,7 +49,7 @@ public static class SessionTools
         [Description("Project name for a newly created schedule.")] string? name = null,
         [Description("Project start date for a newly created schedule, yyyy-MM-dd.")] string? startDate = null)
     {
-        var full = Path.GetFullPath(path);
+        var full = create ? Guard.Path(path, "path") : Guard.ExistingFile(path, "path");
         var readOnly = mode.Trim().Equals("readonly", StringComparison.OrdinalIgnoreCase);
 
         ProjectFile project;
@@ -182,10 +182,10 @@ public static class SessionTools
                 }
 
                 var target = operation == "save_as"
-                    ? path ?? throw new McpToolException("save_as needs a target path.")
-                    : DefaultTargetFor(session.Path, format);
+                    ? Guard.Path(path, "path")
+                    : Guard.Path(DefaultTargetFor(session.Path, format), "path");
 
-                var written = MpxjBackend.Write(session.File, Path.GetFullPath(target), format);
+                var written = MpxjBackend.Write(session.File, target, format);
 
                 session.Dirty = false;
                 session.Fingerprint = ProjectSession.ComputeFingerprint(session.Path, session.File);

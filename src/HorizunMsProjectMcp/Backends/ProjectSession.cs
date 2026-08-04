@@ -35,6 +35,30 @@ public sealed class ProjectSession
     public bool MayReschedule => Authored || RescheduleAuthorised;
     public DateTime OpenedAt { get; } = DateTime.UtcNow;
 
+    private readonly SemaphoreSlim _gate = new(1, 1);
+
+    /// <summary>
+    /// Runs <paramref name="body"/> with exclusive access to this document.
+    /// </summary>
+    /// <remarks>
+    /// MPXJ's object model is not thread-safe, and an MCP client is free to have several tool calls
+    /// in flight at once. Unguarded, sixty concurrent writes to one schedule all failed and left the
+    /// document unusable — measured, not theorised. Every tool that touches a document goes through
+    /// here. The lock is per document, so unrelated schedules never wait on each other.
+    /// </remarks>
+    public T Locked<T>(Func<T> body)
+    {
+        _gate.Wait();
+        try
+        {
+            return body();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     /// <summary>
     /// Identity of the file on disk plus the shape of what we loaded. If either moves, a
     /// write would be pointing at something other than what the agent inspected.
@@ -76,6 +100,20 @@ public static class SessionStore
         return session;
     }
 
+    /// <summary>Resolves a handle and runs the body under that document's lock.</summary>
+    public static T Use<T>(string handle, Func<ProjectSession, T> body)
+    {
+        var session = Get(handle);
+        return session.Locked(() => body(session));
+    }
+
+    /// <summary>As <see cref="Use{T}"/>, but for the tools that modify the document.</summary>
+    public static T UseForWrite<T>(string handle, Func<ProjectSession, T> body)
+    {
+        var session = GetForWrite(handle);
+        return session.Locked(() => body(session));
+    }
+
     public static ProjectSession Get(string handle) =>
         Sessions.TryGetValue(handle, out var s)
             ? s
@@ -115,6 +153,52 @@ public static class SessionStore
     public static bool Remove(string handle) => Sessions.TryRemove(handle, out _);
 
     public static IReadOnlyList<ProjectSession> All() => Sessions.Values.ToList();
+}
+
+/// <summary>Input checks that fail with a message instead of an unexplained exception.</summary>
+/// <remarks>
+/// An empty path used to reach Path.GetFullPath and throw, which the SDK masks as
+/// "An error occurred invoking &lt;tool&gt;" with nothing after it — the one failure mode that
+/// leaves a caller with no idea what happened.
+/// </remarks>
+public static class Guard
+{
+    public static string Path(string? value, string argument)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new McpToolException($"'{argument}' is required and cannot be empty.");
+        }
+
+        try
+        {
+            return System.IO.Path.GetFullPath(value);
+        }
+        catch (Exception ex)
+        {
+            throw new McpToolException(
+                $"'{argument}' is not a usable path: {ex.Message} (given '{value}').");
+        }
+    }
+
+    /// <summary>A path that must already exist as a file, not a directory.</summary>
+    public static string ExistingFile(string? value, string argument)
+    {
+        var full = Path(value, argument);
+
+        if (Directory.Exists(full))
+        {
+            throw new McpToolException(
+                $"'{full}' is a directory, not a schedule file. Give the path of the file itself.");
+        }
+
+        if (!File.Exists(full))
+        {
+            throw new McpToolException($"No file at '{full}'.");
+        }
+
+        return full;
+    }
 }
 
 /// <summary>

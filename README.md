@@ -1,5 +1,7 @@
 # Horizun Project MCP
 
+[![build and test](https://github.com/HorizunGroup/horizun-msproject-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/HorizunGroup/horizun-msproject-mcp/actions/workflows/ci.yml)
+
 **An MCP server for Microsoft Project that needs neither Java nor Microsoft Project — and tells you
 the truth about what it wrote.**
 
@@ -63,6 +65,9 @@ neither, which is most of them. The report says which.
 **Writing** — `tasks_write` · `links_write` · `resources_write` · `calendars_write` · `schedule_update`
 
 Batched, typed, verified. Cycles are refused before they are applied, with the offending chain named.
+Two things this backend cannot do are not offered: reordering a task within the outline, and editing
+a calendar's weekly working-hours pattern. Asking for either gets a refusal that names it and says
+where to do it instead — an operation that half-works is worse than one that is absent.
 
 **Planning** — `schedule_recovery` · `schedule_target` · `schedule_sequence` · `schedule_learn` · `schedule_generate`
 
@@ -201,10 +206,13 @@ cd src/HorizunMsProjectMcp && dotnet build && cd ../..
 python tools/acceptance-test.py   # 65 checks, all 20 tools end to end
 python tools/scheduler-test.py    # 45 checks, critical-path engine correctness
 python tools/planning-test.py     # 52 checks, reprogramming and learning
+python tools/robustness-test.py   # 25 checks, concurrency and hostile input
 python tools/smoke-test.py        # 13 checks, environment and capabilities
 ```
 
-**175 checks**, driven over real JSON-RPC against the running server.
+**200 checks**, driven over real JSON-RPC against the running server, on Windows and on
+Linux. The Linux job is the evidence for the headline claim: it runs on a machine with no
+JVM and no Microsoft Project.
 
 The acceptance suite builds a construction schedule from nothing and asserts the contracts above:
 that a dry run commits nothing, that a cycle is refused before it is applied, that a write to an
@@ -223,6 +231,11 @@ Beyond the suites, the server has been driven through a planner's full working c
 production construction schedules — a 5,985-task programme and a 170 MB, 1,937-task one — opening,
 auditing, baselining, recording progress, measuring earned value and exporting the Power BI
 dataset, and read against files of up to 7,000 tasks.
+
+The robustness suite is the one that matters for trusting this in a real client: forty writes in
+flight at once on the same document, hostile paths, absurd page sizes, non-latin names. MPXJ's
+object model is not thread-safe and an MCP client is free to pipeline calls — unguarded, sixty
+concurrent writes all failed and left the document unusable. Every document now has its own lock.
 
 Rebuild the installable package with `dotnet pack -c Release`.
 
@@ -251,6 +264,7 @@ tools/
   acceptance-test.py   end-to-end across all 20 tools, 65 checks
   scheduler-test.py    engine correctness, format round trips, safety guards, 45 checks
   planning-test.py     recovery, sequencing, target dates, learning, generation, 52 checks
+  robustness-test.py   concurrency, malformed input, absurd values, 25 checks
   smoke-test.py        environment and capability matrix, 13 checks
 ```
 
