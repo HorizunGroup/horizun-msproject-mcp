@@ -5,6 +5,8 @@
 **An MCP server for Microsoft Project that needs neither Java nor Microsoft Project — and tells you
 the truth about what it wrote.**
 
+*[Español](README.es.md)*
+
 <!-- mcp-name: io.github.HorizunGroup/horizun-msproject-mcp -->
 <!-- The registry verifies ownership by finding that name in the published package's README.
      It has to travel inside the NuGet package, which is why it lives here rather than in a
@@ -210,9 +212,10 @@ any schedule this server authored.
 
 ---
 
-## Wiring it to a client
+## Wiring it to any other client
 
-Claude Desktop, Claude Code, Cursor, VS Code — anything that speaks MCP over stdio:
+Claude Desktop, Claude Code and Codex are covered in [docs/INSTALL.md](docs/INSTALL.md). For
+anything else that speaks MCP over stdio — Cursor, VS Code, your own client:
 
 ```jsonc
 {
@@ -224,7 +227,7 @@ Claude Desktop, Claude Code, Cursor, VS Code — anything that speaks MCP over s
 }
 ```
 
-Registry name: `io.github.horizungroup/horizun-msproject-mcp` (see [`server.json`](server.json)).
+Registry name: `io.github.HorizunGroup/horizun-msproject-mcp` (see [`.mcp/server.json`](.mcp/server.json)).
 
 Call `project_health` first in every session — it tells you which backend you are on and what it
 can do.
@@ -233,14 +236,15 @@ can do.
 
 ```bash
 cd src/HorizunMsProjectMcp && dotnet build && cd ../..
-python tools/acceptance-test.py   # 65 checks, all 20 tools end to end
+python tools/acceptance-test.py   # 65 checks, all 25 tools end to end
 python tools/scheduler-test.py    # 45 checks, critical-path engine correctness
 python tools/planning-test.py     # 52 checks, reprogramming and learning
 python tools/robustness-test.py   # 34 checks, concurrency and hostile input
 python tools/smoke-test.py        # 13 checks, environment and capabilities
+python tools/packaging-test.py    # 33 checks, the metadata every client reads
 ```
 
-**209 checks**, driven over real JSON-RPC against the running server, on Windows and on
+**242 checks**, driven over real JSON-RPC against the running server, on Windows and on
 Linux. The Linux job is the evidence for the headline claim: it runs on a machine with no
 JVM and no Microsoft Project.
 
@@ -295,13 +299,14 @@ src/HorizunMsProjectMcp/
   Analysis/      critical-path engine, working calendar, DCMA-14, earned value
   Writes/        the verified-write engine
   Bim/           element matching and the 4D bridge
-  Tools/         the 20 MCP tools
+  Tools/         the 25 MCP tools
 tools/
-  acceptance-test.py   end-to-end across all 20 tools, 65 checks
+  acceptance-test.py   end-to-end across all 25 tools, 65 checks
   scheduler-test.py    engine correctness, format round trips, safety guards, 45 checks
   planning-test.py     recovery, sequencing, target dates, learning, generation, 52 checks
   robustness-test.py   concurrency, malformed input, resource limits, 34 checks
   smoke-test.py        environment and capability matrix, 13 checks
+  packaging-test.py    versions, identifiers and client manifests agree, 33 checks
 ```
 
 Design rationale and the market benchmark that motivated it: [DESIGN-TOOL-SURFACE.md](DESIGN-TOOL-SURFACE.md)
