@@ -31,7 +31,7 @@ jobs:
       # The first build translates MPXJ from Java with IKVM and takes minutes; the result
       # is deterministic for a given MPXJ version, so it is worth caching.
       - name: Cache NuGet and the IKVM translation
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.nuget/packages
@@ -82,7 +82,7 @@ jobs:
           python-version: '3.12'
 
       - name: Cache NuGet and the IKVM translation
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.nuget/packages
