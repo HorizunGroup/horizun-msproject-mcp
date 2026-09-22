@@ -18,7 +18,7 @@ jobs:
     # binary .mpp through Microsoft Project, and the COM diagnosis project_health reports.
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -71,7 +71,7 @@ jobs:
     # evidence: a machine with neither, running everything that does not require them.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-dotnet@v4
         with:
