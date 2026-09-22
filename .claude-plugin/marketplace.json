@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "horizun",
+  "description": "Open source plugins by HorizunGroup",
+  "owner": {"name": "HorizunGroup"},
+  "plugins": [
+    {
+      "name": "horizun-msproject-mcp",
+      "description": "Audit, reschedule and author Microsoft Project schedules.",
+      "author": {"name": "HorizunGroup"},
+      "category": "development",
+      "source": {"source": "url", "url": "https://github.com/HorizunGroup/horizun-msproject-mcp.git", "ref": "v1.1.0"},
+      "homepage": "https://github.com/HorizunGroup/horizun-msproject-mcp"
+    }
+  ]
+}

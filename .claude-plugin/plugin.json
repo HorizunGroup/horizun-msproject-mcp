@@ -1,0 +1,16 @@
+{
+  "name": "horizun-msproject-mcp",
+  "version": "1.1.0",
+  "description": "Audit, reschedule and author Microsoft Project schedules with a critical-path engine, DCMA-14 and verified writes. No Java, no Project install.",
+  "author": {"name": "HorizunGroup", "url": "https://github.com/HorizunGroup"},
+  "homepage": "https://github.com/HorizunGroup/horizun-msproject-mcp",
+  "repository": "https://github.com/HorizunGroup/horizun-msproject-mcp",
+  "license": "MIT",
+  "keywords": ["microsoft-project", "mpp", "mcp", "scheduling", "critical-path", "dcma", "primavera", "earned-value", "bim", "4d"],
+  "mcpServers": {
+    "horizun-msproject-mcp": {
+      "command": "horizun-msproject-mcp",
+      "args": []
+    }
+  }
+}

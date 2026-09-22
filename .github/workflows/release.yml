@@ -59,9 +59,15 @@ jobs:
           python tools/scheduler-test.py
           python tools/planning-test.py
           python tools/robustness-test.py
+          python tools/packaging-test.py
 
       - name: Pack
         run: dotnet pack src/HorizunMsProjectMcp -c Release --nologo
+
+      # Built from the same commit as the package it installs, and the build
+      # refuses to run when the two versions disagree.
+      - name: Build the Claude Desktop extension
+        run: python scripts/build_mcpb.py
 
       - name: Check the version matches the tag
         shell: bash
@@ -92,9 +98,24 @@ jobs:
             --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
             --skip-duplicate
 
-      - name: Attach the package to the release
+      # The .mcpb is how Claude Desktop installs this, so it has to be on the
+      # release itself: there is nowhere else for someone to get it.
+      - name: Attach the package and the extension to the release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: nupkg/*.nupkg
+          files: |
+            nupkg/*.nupkg
+            dist/*.mcpb
           generate_release_notes: true
+
+      # A dispatch-triggered publish has no tag and therefore no release to
+      # attach to, so the extension is kept as a build artifact instead of being
+      # silently dropped.
+      - name: Keep the extension when there is no release to attach it to
+        uses: actions/upload-artifact@v4
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        with:
+          name: claude-desktop-extension
+          path: dist/*.mcpb
+          if-no-files-found: error

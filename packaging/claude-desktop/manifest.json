@@ -1,0 +1,50 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
+  "manifest_version": "0.3",
+  "name": "horizun-msproject",
+  "display_name": "Horizun Project MCP",
+  "version": "1.1.0",
+  "description": "Audit, reschedule and author Microsoft Project schedules. No Java, no Project install.",
+  "long_description": "Point this at a Microsoft Project `.mpp`, a Primavera `.xer` or an MSPDI `.xml` and ask real questions: where the critical path runs, which resources are overbooked, whether the schedule would survive a DCMA audit, what a two-week slip does to the finish date. Then write changes back and know which ones landed, because every write is re-read from the model before it is reported as applied.\n\n**It does not need Java or Microsoft Project.** MPXJ is compiled to .NET through IKVM, and the critical-path engine is its own. That engine is not Microsoft Project's scheduler: on four real client schedules it agreed with Project's own dates on 100%, 69%, 23% and 23% of tasks to the day. Read the comparison in the README before treating a recomputed date as authoritative.\n\n**The extension does not carry the server.** It installs `HorizunMsProjectMcp` from NuGet on first launch, which needs the .NET 8 SDK on the machine, and runs the copy `dotnet tool` put there.",
+  "author": {
+    "name": "Horizun Group",
+    "url": "https://github.com/HorizunGroup"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HorizunGroup/horizun-msproject-mcp.git"
+  },
+  "homepage": "https://github.com/HorizunGroup/horizun-msproject-mcp",
+  "documentation": "https://github.com/HorizunGroup/horizun-msproject-mcp/blob/main/docs/INSTALL.md",
+  "support": "https://github.com/HorizunGroup/horizun-msproject-mcp/issues",
+  "license": "MIT",
+  "keywords": [
+    "microsoft-project",
+    "mpp",
+    "scheduling",
+    "critical-path",
+    "dcma",
+    "primavera",
+    "earned-value",
+    "bim",
+    "4d",
+    "construction"
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "launcher.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/launcher.js"],
+      "env": {}
+    }
+  },
+  "tools_generated": false,
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["win32", "darwin", "linux"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}

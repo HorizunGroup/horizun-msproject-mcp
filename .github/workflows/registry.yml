@@ -29,9 +29,9 @@ jobs:
       - name: Read the version out of server.json
         id: server
         run: |
-          version=$(jq -r '.version' server.json)
-          package=$(jq -r '.packages[0].version' server.json)
-          name=$(jq -r '.name' server.json)
+          version=$(jq -r '.version' .mcp/server.json)
+          package=$(jq -r '.packages[0].version' .mcp/server.json)
+          name=$(jq -r '.name' .mcp/server.json)
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "package=$package" >> "$GITHUB_OUTPUT"
           echo "name=$name" >> "$GITHUB_OUTPUT"
@@ -69,7 +69,7 @@ jobs:
         run: mcp-publisher login github-oidc
 
       - name: Publish
-        run: mcp-publisher publish
+        run: mcp-publisher publish .mcp/server.json
 
       - name: Confirm it is listed
         run: |

@@ -1,0 +1,49 @@
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Monday early, so a finding from a newly published rule is waiting at the
+    # start of the week rather than landing in the middle of one.
+    - cron: '21 5 * * 1'
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    # C# has to build to be analysed, and it builds on Windows here; the other
+    # two are interpreted and run cheaper on Linux.
+    runs-on: ${{ matrix.language == 'csharp' && 'windows-latest' || 'ubuntu-latest' }}
+    permissions:
+      security-events: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # javascript-typescript covers the Claude Desktop launcher; python covers
+        # the test suites and the packaging scripts.
+        language: [csharp, javascript-typescript, python]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        if: matrix.language == 'csharp'
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Build
+        if: matrix.language == 'csharp'
+        run: dotnet build src/HorizunMsProjectMcp -c Debug --nologo
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

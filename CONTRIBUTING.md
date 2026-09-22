@@ -12,9 +12,15 @@ python tools/scheduler-test.py
 python tools/planning-test.py
 python tools/robustness-test.py
 python tools/smoke-test.py
+python tools/packaging-test.py
 ```
 
 The first build translates MPXJ from Java with IKVM and takes several minutes. Later builds do not.
+
+`packaging-test.py` needs no build: it reads the metadata. Nine files repeat the version, the
+package id and the command name, and nothing else catches them drifting — the server still starts,
+every other suite still passes, and the only symptom is a client that installs one thing and runs
+another.
 
 The suites drive the real server over JSON-RPC on stdio — there are no mocks, and nothing is
 asserted about the internals. If a change is worth making, it should be visible from outside.
@@ -73,10 +79,15 @@ Publishing runs from a tag and authenticates with NuGet Trusted Publishing, so t
 anywhere — not in a secret, not in a terminal, not in this repository. NuGet trusts a short-lived
 token GitHub mints for this repository and `release.yml` specifically.
 
-1. Set `<Version>` in `src/HorizunMsProjectMcp/HorizunMsProjectMcp.csproj`.
-2. `git tag v1.0.0 && git push origin v1.0.0`.
+1. Set `<Version>` in `src/HorizunMsProjectMcp/HorizunMsProjectMcp.csproj`, in
+   `.mcp/server.json` (both fields), in `packaging/claude-desktop/manifest.json`, in the
+   `VERSION` constant of `packaging/claude-desktop/launcher.js`, and in the four client manifests
+   under `.claude-plugin/`, `.codex-plugin/` and `.agents/plugins/`. `packaging-test.py` lists
+   every one of them and fails until they agree.
+2. Add the release to `CHANGELOG.md`.
+3. `git tag v1.1.0 && git push origin v1.1.0`.
 
-The workflow runs all five suites before it packs anything and refuses to publish if the built
+The workflow runs all six suites before it packs anything and refuses to publish if the built
 version does not match the tag. A version on NuGet cannot be deleted afterwards, only hidden, which
 is why nothing ships that has not passed everything first.
 
@@ -92,5 +103,21 @@ before it starts. The registry proves ownership by fetching the published packag
 lives in `README.md` and travels inside the package. Removing it silently breaks publishing to the
 registry while leaving NuGet unaffected.
 
-`server.json` must declare the same version as the package it points at; the workflow refuses
+`.mcp/server.json` must declare the same version as the package it points at; the workflow refuses
 otherwise, since a registry entry advertising a version nobody can install is worse than no entry.
+
+The namespace is case-sensitive. The registry derives what you may publish from the GitHub owner
+verbatim — `io.github.HorizunGroup/*` — and treats a lowercase claim as a different namespace
+rather than the same one spelled casually.
+
+### The Claude Desktop extension
+
+`scripts/build_mcpb.py` packs `packaging/claude-desktop/` into a `.mcpb`, which `release.yml`
+attaches to the GitHub release. The bundle carries a launcher, not the server: the server unpacks
+to roughly 650 MB, and an extension that embedded it would be a download nobody wants and a copy
+frozen at the version it shipped with. On first launch the launcher installs the package from NuGet
+and runs it.
+
+Two rules the build enforces, because neither failure is visible at runtime until a user hits it:
+the bundle refuses to pack when any of those version declarations disagree, and the tool list it
+advertises is read from a freshly built server rather than from a list somebody kept by hand.

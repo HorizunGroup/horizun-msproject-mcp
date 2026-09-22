@@ -1,0 +1,28 @@
+name: Proposal
+description: Something this should be able to do and cannot.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The tool surface is deliberately held at 25: every tool costs schema in
+        every prompt for as long as the server is connected, and past a point an
+        agent cannot choose correctly within its own surface. A proposal that
+        extends an existing tool usually lands better than one that adds a tool.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The scheduling problem, not the API you imagine for it.
+    validations: {required: true}
+  - type: textarea
+    id: today
+    attributes:
+      label: What happens today
+      description: What you do instead, and where it falls down.
+    validations: {required: true}
+  - type: textarea
+    id: shape
+    attributes:
+      label: What it might look like
+      description: Optional. An existing tool it could extend, if you see one.

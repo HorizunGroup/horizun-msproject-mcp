@@ -1,0 +1,14 @@
+{
+  "name": "horizun",
+  "description": "Open source plugins by HorizunGroup",
+  "interface": {"displayName": "Horizun Open Source"},
+  "plugins": [
+    {
+      "name": "horizun-msproject-mcp",
+      "description": "Audit, reschedule and author Microsoft Project schedules.",
+      "source": {"source": "url", "url": "https://github.com/HorizunGroup/horizun-msproject-mcp.git", "ref": "v1.1.0"},
+      "policy": {"installation": "AVAILABLE", "authentication": "NONE"},
+      "category": "Developer Tools"
+    }
+  ]
+}

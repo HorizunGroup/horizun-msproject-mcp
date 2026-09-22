@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Installing or connecting a client
+    url: https://github.com/HorizunGroup/horizun-msproject-mcp/blob/main/docs/INSTALL.md
+    about: Claude Desktop, Claude Code, Codex and ChatGPT, step by step.
+  - name: Security vulnerability
+    url: https://github.com/HorizunGroup/horizun-msproject-mcp/security/advisories/new
+    about: Report privately. Please do not open a public issue.

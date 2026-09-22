@@ -57,6 +57,12 @@ jobs:
       - name: Concurrency and hostile input
         run: python tools/robustness-test.py
 
+      - name: Packaging metadata agrees with itself
+        run: python tools/packaging-test.py
+
+      - name: Build the Claude Desktop extension
+        run: python scripts/build_mcpb.py
+
       - name: Package
         run: dotnet pack src/HorizunMsProjectMcp -c Release --nologo
 
@@ -110,3 +116,6 @@ jobs:
 
       - name: Concurrency and hostile input
         run: python tools/robustness-test.py
+
+      - name: Packaging metadata agrees with itself
+        run: python tools/packaging-test.py

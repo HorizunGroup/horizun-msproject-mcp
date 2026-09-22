@@ -1,0 +1,55 @@
+name: Bug report
+description: Something behaved differently than it said it would.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful report names what you asked for, what came back, and what
+        you expected instead. If a write was reported as applied and was not,
+        say so explicitly — that breaks this server's central contract and is
+        treated accordingly.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`dotnet tool list -g` — or the extension version in Claude Desktop."
+      placeholder: "1.1.0"
+    validations: {required: true}
+  - type: dropdown
+    id: client
+    attributes:
+      label: Client
+      options: [Claude Desktop, Claude Code, Codex, ChatGPT via a bridge, Other stdio client]
+    validations: {required: true}
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11 26200 / macOS 15.3 / Ubuntu 24.04"
+    validations: {required: true}
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The tool you called, the arguments, and the answer you got back.
+    validations: {required: true}
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations: {required: true}
+  - type: textarea
+    id: file
+    attributes:
+      label: The schedule
+      description: |
+        Format (.mpp / .xer / .xml), roughly how many tasks, and anything unusual
+        about it. **Do not attach a client's file.** If it only reproduces on a
+        confidential schedule, say so and we will work out a redacted case.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server output
+      description: Anything the server wrote to stderr.
+      render: text

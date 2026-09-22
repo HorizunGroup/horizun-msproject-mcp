@@ -21,7 +21,7 @@
     <ToolCommandName>horizun-msproject-mcp</ToolCommandName>
     <PackageOutputPath>$(MSBuildThisFileDirectory)../../nupkg</PackageOutputPath>
     <PackageId>HorizunMsProjectMcp</PackageId>
-    <Version>1.0.2</Version>
+    <Version>1.1.0</Version>
     <Authors>Horizun</Authors>
     <Description>
       MCP server for Microsoft Project schedules. Reads and writes .mpp, MSPDI, Primavera XER/PMXML
@@ -39,6 +39,11 @@
 
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <!-- MPXJ.Net and IKVM are LGPL-2.1-or-later and, because this packs as a
+         .NET tool, their assemblies are redistributed inside the package. The
+         attribution has to travel with the artefact that carries them, not just
+         sit in the repository. -->
+    <None Include="../../NOTICE" Pack="true" PackagePath="/" />
   </ItemGroup>
 
   <ItemGroup>

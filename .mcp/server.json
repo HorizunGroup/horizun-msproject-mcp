@@ -3,7 +3,7 @@
   "name": "io.github.HorizunGroup/horizun-msproject-mcp",
   "title": "Microsoft Project",
   "description": "Audit, reschedule and author Microsoft Project schedules. No Java, no Project install.",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "repository": {
     "url": "https://github.com/HorizunGroup/horizun-msproject-mcp",
     "source": "github"
@@ -14,7 +14,7 @@
       "registryType": "nuget",
       "registryBaseUrl": "https://api.nuget.org/v3/index.json",
       "identifier": "HorizunMsProjectMcp",
-      "version": "1.0.2",
+      "version": "1.1.0",
       "transport": {
         "type": "stdio"
       }

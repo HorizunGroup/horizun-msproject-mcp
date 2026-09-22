@@ -1,0 +1,38 @@
+Horizun Project MCP
+Copyright (c) 2026 Horizun Group
+
+Licensed under the MIT License. See LICENSE.
+
+This product includes third-party software:
+
+  MPXJ (https://www.mpxj.org/)
+  Copyright Jon Iles and contributors.
+  Licensed under the GNU Lesser General Public License, version 2.1 or later
+  (LGPL-2.1-or-later). Source: https://github.com/joniles/mpxj
+  Used as MPXJ.Net, the IKVM-compiled .NET distribution, taken unmodified from
+  its NuGet package. It is what lets this server read and write Microsoft
+  Project, Primavera and other schedule formats with no Java runtime present.
+
+  Because this package is a .NET tool, MPXJ.Net's assemblies are redistributed
+  inside it rather than resolved separately at install time. They are separate,
+  unmodified .NET assemblies: replacing them with a different build of the same
+  library is a matter of substituting the files in the installed tool directory,
+  which is the relinking freedom LGPL-2.1 section 6 asks to be preserved.
+
+  IKVM (https://github.com/ikvmnet/ikvm)
+  Copyright Jeroen Frijters and contributors.
+  Licensed under the zlib License.
+  Ships as part of MPXJ.Net and is redistributed on the same terms as above.
+
+  ModelContextProtocol C# SDK (https://github.com/modelcontextprotocol/csharp-sdk)
+  Copyright (c) Anthropic and contributors.
+  Licensed under the MIT License.
+
+  .NET and Microsoft.Extensions.* libraries (https://github.com/dotnet)
+  Copyright (c) .NET Foundation and Contributors.
+  Licensed under the MIT License.
+
+Microsoft, Microsoft Project and Power BI are trademarks of Microsoft
+Corporation. Primavera is a trademark of Oracle Corporation. Navisworks is a
+trademark of Autodesk, Inc. This project is not affiliated with, endorsed by, or
+sponsored by any of them.

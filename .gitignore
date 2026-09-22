@@ -14,3 +14,7 @@ nupkg/
 .claude/
 
 # Cross-platform publish output.
+dist/
+
+# Node's cache when npx fetches the MCPB packaging CLI.
+node_modules/

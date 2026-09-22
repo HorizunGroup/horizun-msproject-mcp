@@ -1,0 +1,30 @@
+{
+  "_README": [
+    "MCP configuration template for horizun-msproject-mcp.",
+    "",
+    "Install the server first — it is a .NET global tool and lands on PATH:",
+    "    dotnet tool install -g HorizunMsProjectMcp",
+    "",
+    "Then copy this file to .mcp.json (project scope) or merge the mcpServers",
+    "block into your client's own configuration. No paths to fix: the command",
+    "below is the shim dotnet put on PATH.",
+    "",
+    "If your PATH does not carry ~/.dotnet/tools, replace \"command\" with the",
+    "full path to the executable, for example:",
+    "    C:/Users/<you>/.dotnet/tools/horizun-msproject-mcp.exe",
+    "    /Users/<you>/.dotnet/tools/horizun-msproject-mcp",
+    "",
+    "Per-client instructions — Claude Desktop, Claude Code, Codex, ChatGPT —",
+    "are in docs/INSTALL.md.",
+    "",
+    "This _README key is documentation only; MCP clients ignore it."
+  ],
+  "mcpServers": {
+    "horizun-msproject-mcp": {
+      "type": "stdio",
+      "command": "horizun-msproject-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}

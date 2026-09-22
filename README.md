@@ -25,6 +25,18 @@ its own.
 
 [![NuGet](https://img.shields.io/nuget/v/HorizunMsProjectMcp.svg)](https://www.nuget.org/packages/HorizunMsProjectMcp)
 
+### Connect a client
+
+| Client | Do this |
+|---|---|
+| **Claude Desktop** | Download the `.mcpb` from [Releases](https://github.com/HorizunGroup/horizun-msproject-mcp/releases/latest) and drop it on **Settings → Extensions**. It installs the server itself — nothing to run first. |
+| **Claude Code** | `claude mcp add horizun-msproject-mcp -- horizun-msproject-mcp` |
+| **Codex** | `codex mcp add horizun-msproject-mcp -- horizun-msproject-mcp` |
+| **ChatGPT** | Needs an HTTPS bridge in front of the stdio server. [How, and what to weigh first.](docs/INSTALL.md#chatgpt) |
+
+Full per-client instructions, including the plugin route and uninstall, are in
+[docs/INSTALL.md](docs/INSTALL.md).
+
 ---
 
 ## Why this one

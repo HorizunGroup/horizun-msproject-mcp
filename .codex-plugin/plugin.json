@@ -1,0 +1,31 @@
+{
+  "name": "horizun-msproject-mcp",
+  "version": "1.1.0",
+  "description": "Audit, reschedule and author Microsoft Project schedules with a critical-path engine, DCMA-14 and verified writes. No Java, no Project install.",
+  "author": {"name": "HorizunGroup", "url": "https://github.com/HorizunGroup"},
+  "homepage": "https://github.com/HorizunGroup/horizun-msproject-mcp",
+  "repository": "https://github.com/HorizunGroup/horizun-msproject-mcp",
+  "license": "MIT",
+  "keywords": ["microsoft-project", "mpp", "mcp", "scheduling", "critical-path", "dcma", "primavera", "earned-value", "bim", "4d"],
+  "mcpServers": {
+    "horizun-msproject-mcp": {
+      "command": "horizun-msproject-mcp",
+      "args": []
+    }
+  },
+  "interface": {
+    "displayName": "Horizun Project MCP",
+    "shortDescription": "Read, audit and reschedule Microsoft Project files",
+    "longDescription": "Open a Microsoft Project .mpp, a Primavera .xer or an MSPDI .xml and ask where the critical path runs, who is overbooked, and whether the schedule would pass a DCMA audit. Reschedule against a target date, recover the logic a planner never linked, and write changes back — every write is re-read from the model before it is reported as applied. Runs without Java and without Microsoft Project installed.",
+    "developerName": "HorizunGroup",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write", "Local MCP"],
+    "websiteURL": "https://github.com/HorizunGroup/horizun-msproject-mcp",
+    "defaultPrompt": [
+      "Audit this schedule against DCMA-14 and tell me what would fail.",
+      "Which tasks are late, and what is the earliest finish I can still hit?",
+      "This schedule has almost no links — recover the logic its dates already imply."
+    ],
+    "brandColor": "#31752F"
+  }
+}
