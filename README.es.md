@@ -218,12 +218,12 @@ python tools/acceptance-test.py   # 65 chequeos, las 25 herramientas de punta a 
 python tools/scheduler-test.py    # 45 chequeos, corrección del motor de ruta crítica
 python tools/planning-test.py     # 52 chequeos, reprogramación y aprendizaje
 python tools/robustness-test.py   # 34 chequeos, concurrencia y entrada hostil
-python tools/smoke-test.py        # 13 chequeos, entorno y capacidades
+python tools/smoke-test.py        # 15 chequeos, entorno y capacidades
 python tools/packaging-test.py    # 33 chequeos, la metadata que lee cada cliente
 python tools/project-engine-test.py  # 20 chequeos, Microsoft Project como motor (requiere Project)
 ```
 
-**262 chequeos**, ejecutados sobre JSON-RPC real contra el servidor corriendo, en Windows y en
+**264 chequeos**, ejecutados sobre JSON-RPC real contra el servidor corriendo, en Windows y en
 Linux. Con Microsoft Project instalado, las suites corren con Project calculando las fechas, y
 `project-engine-test.py` compara el servidor contra Project haciendo lo mismo a mano — fechas, avance
 y resúmenes, tarea por tarea — y verifica que un Project que tengas abierto quede exactamente como

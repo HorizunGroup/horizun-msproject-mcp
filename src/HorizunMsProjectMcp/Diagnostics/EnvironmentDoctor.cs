@@ -57,7 +57,15 @@ public sealed record RuntimeInfo
 public static class EnvironmentDoctor
 {
     public const string ServerName = "horizun-project-mcp";
-    public const string ServerVersion = "0.1.0";
+    /// <summary>The package version, read from the assembly so it cannot fall out of step with the
+    /// csproj — a hard-coded copy said 0.1.0 through five releases.</summary>
+    public static readonly string ServerVersion =
+        (typeof(EnvironmentDoctor).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .FirstOrDefault() as System.Reflection.AssemblyInformationalVersionAttribute)?.InformationalVersion
+            .Split('+')[0]
+        ?? typeof(EnvironmentDoctor).Assembly.GetName().Version?.ToString(3)
+        ?? "unknown";
 
     public static HealthReport Run(bool deep)
     {

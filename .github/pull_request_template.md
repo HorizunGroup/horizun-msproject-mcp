@@ -11,7 +11,7 @@
 <!-- Which suite, which real file, which numbers moved. "Tests pass" on its own
      does not say much: all five suites pass on main already. -->
 
-- [ ] `python tools/smoke-test.py` (13 checks)
+- [ ] `python tools/smoke-test.py` (15 checks)
 - [ ] `python tools/acceptance-test.py` (65)
 - [ ] `python tools/scheduler-test.py` (45)
 - [ ] `python tools/planning-test.py` (52)

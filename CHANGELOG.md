@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `project_health` reported its version as 0.1.0, a constant left from the first commit. It now reads
+  the package version, and the smoke test fails if the two ever disagree again.
+
 ## [1.2.0] — 2026-09-22
 
 ### Changed

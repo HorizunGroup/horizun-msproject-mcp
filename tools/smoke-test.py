@@ -115,6 +115,14 @@ def main() -> int:
         print(json.dumps(report, indent=2))
 
         check("names a backend", report.get("backend") in {"mpxj", "com"})
+        check("names who calculates the dates",
+              report.get("schedulingEngine") in {"microsoft-project", "internal-cpm"},
+              str(report.get("schedulingEngine")))
+        csproj = (ROOT / "src" / "HorizunMsProjectMcp" / "HorizunMsProjectMcp.csproj").read_text(encoding="utf-8")
+        declared = csproj.split("<Version>")[1].split("</Version>")[0]
+        # A bug report is only as useful as the version it quotes.
+        check("reports the version the package declares", report.get("version") == declared,
+              f"{report.get('version')} vs {declared}")
         check("reports the runtime", bool(report.get("runtime", {}).get("framework")))
 
         caps = report.get("capabilities", {})

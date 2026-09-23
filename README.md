@@ -262,12 +262,12 @@ python tools/acceptance-test.py   # 65 checks, all 25 tools end to end
 python tools/scheduler-test.py    # 45 checks, critical-path engine correctness
 python tools/planning-test.py     # 52 checks, reprogramming and learning
 python tools/robustness-test.py   # 34 checks, concurrency and hostile input
-python tools/smoke-test.py        # 13 checks, environment and capabilities
+python tools/smoke-test.py        # 15 checks, environment and capabilities
 python tools/packaging-test.py    # 33 checks, the metadata every client reads
 python tools/project-engine-test.py  # 20 checks, Microsoft Project as the engine (needs Project)
 ```
 
-**262 checks**, driven over real JSON-RPC against the running server, on Windows and on
+**264 checks**, driven over real JSON-RPC against the running server, on Windows and on
 Linux. With Microsoft Project installed the suites run with Project calculating the dates, and
 `project-engine-test.py` compares the server against Project doing the same thing by hand — dates,
 progress and summaries, task by task — and checks that a Project you have open is left exactly as it
@@ -331,7 +331,7 @@ tools/
   scheduler-test.py    engine correctness, format round trips, safety guards, 45 checks
   planning-test.py     recovery, sequencing, target dates, learning, generation, 52 checks
   robustness-test.py   concurrency, malformed input, resource limits, 34 checks
-  smoke-test.py        environment and capability matrix, 13 checks
+  smoke-test.py        environment and capability matrix, 15 checks
   packaging-test.py    versions, identifiers and client manifests agree, 33 checks
   project-engine-test.py  Microsoft Project as the engine, against Project by hand, 20 checks
 ```
