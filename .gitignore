@@ -18,3 +18,7 @@ dist/
 
 # Node's cache when npx fetches the MCPB packaging CLI.
 node_modules/
+
+# Python bytecode from the test suites.
+__pycache__/
+*.pyc

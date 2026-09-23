@@ -181,6 +181,10 @@ def main() -> int:
 
         # ------------------------------------------------------------ concurrency
         print("\n== many calls in flight at once on one document ==")
+        # Through Microsoft Project every write is a full calculation in Project — seconds each, and
+        # one at a time across the whole machine — so forty of them take minutes rather than seconds.
+        # What this checks is that none is lost or mangled, not how fast Project is.
+        engine = c.call("project_health").get("schedulingEngine")
         writes = 40
         ids = [c.send_call("tasks_write", handle=h, ops=[
             {"op": "create", "name": f"T{n:03}", "duration": "2d"}]) for n in range(writes)]
@@ -189,7 +193,7 @@ def main() -> int:
             ids.append(c.send_call("tasks_query", handle=h, limit=100))
             ids.append(c.send_call("schedule_analyze", handle=h, aspects=["critical_path"]))
 
-        answered = c.wait(ids, timeout=180)
+        answered = c.wait(ids, timeout=900 if engine == "microsoft-project" else 180)
         check("every call in flight is answered", answered,
               f"{sum(1 for i in ids if i in c.replies)}/{len(ids)}")
         check("the server survived it", c.alive())
@@ -314,8 +318,14 @@ def main() -> int:
 
         huge = c.call("tasks_write", handle=h, ops=[
             {"op": "create", "name": "Very long", "duration": "99999d"}])
-        check("an absurd duration is accepted rather than crashing",
-              huge.get("applied") == 1, json.dumps(huge.get("rejected"))[:110])
+        # The internal engine takes it as written. Microsoft Project cannot: its calendar ends in
+        # 2149, so it shortens the task, and the write is reported as rejected with the reason.
+        # Either is honest; what matters is that nothing crashes and nothing is claimed that is false.
+        refused = huge.get("rejected") or []
+        check("an absurd duration is accepted, or refused with a reason, rather than crashing",
+              huge.get("applied") == 1
+              or (huge.get("applied") == 0 and refused and all(r.get("reason") for r in refused)),
+              json.dumps(huge.get("rejected"))[:110])
 
         check("the document still reads back cleanly",
               c.call("project_info", handle=h).get("tasks", 0) > 0)

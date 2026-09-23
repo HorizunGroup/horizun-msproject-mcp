@@ -7,11 +7,17 @@ start-to-finish, negative lag, constraints, deadlines and negative float, calend
 exceptions, and a real binary .mpp round trip.
 
     python tools/scheduler-test.py
+
+It pins the server to the internal engine (HORIZUN_MSPROJECT_ENGINE=internal), because that engine
+is what it tests: on a machine with Microsoft Project the server would otherwise hand scheduling to
+Project, and this suite would be measuring Project instead. Project as the engine is covered by
+project-engine-test.py.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -40,6 +46,7 @@ class Client:
         self.proc = subprocess.Popen(
             [str(exe)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, encoding="utf-8", bufsize=1,
+            env={**os.environ, "HORIZUN_MSPROJECT_ENGINE": "internal"},
         )
         self._id = 0
         self._rpc("initialize", {"protocolVersion": "2024-11-05", "capabilities": {},

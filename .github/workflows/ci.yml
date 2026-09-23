@@ -60,6 +60,11 @@ jobs:
       - name: Packaging metadata agrees with itself
         run: python tools/packaging-test.py
 
+      # Hosted runners have no Microsoft Project, so this reports itself skipped here. It is run
+      # locally, on a machine with Project, before every release (see CONTRIBUTING.md).
+      - name: Microsoft Project as the scheduling engine
+        run: python tools/project-engine-test.py
+
       - name: Build the Claude Desktop extension
         run: python scripts/build_mcpb.py
 

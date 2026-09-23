@@ -5,6 +5,9 @@ namespace Horizun.ProjectMcp.Analysis;
 
 public sealed record ScheduleRunReport
 {
+    /// <summary>Who computed the dates: <see cref="Scheduler.MicrosoftProject"/> or <see cref="Scheduler.Internal"/>.</summary>
+    public string Engine { get; init; } = Scheduler.Internal;
+
     public required int TasksScheduled { get; init; }
     public required int SummariesRolledUp { get; init; }
     public required int CriticalTasks { get; init; }

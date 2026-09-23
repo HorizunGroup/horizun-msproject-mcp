@@ -14,6 +14,11 @@ public sealed class PendingOp
 {
     public required string Label { get; init; }
     public List<Func<ProjectFile, RejectedWrite?>> Checks { get; } = new();
+
+    /// <summary>The operation scheduled the document itself (recalculate, reschedule_incomplete).
+    /// A batch made only of these needs no second pass — which, through Microsoft Project, would
+    /// double the time for nothing.</summary>
+    public bool SchedulesItself { get; init; }
 }
 
 /// <summary>State captured before a write, so the impact can be measured rather than predicted.</summary>
@@ -89,7 +94,7 @@ public static class WriteEngine
         // On a dry run the copy is disposable, so bring it onto our engine's own baseline first.
         // Otherwise the diff would be dominated by our engine disagreeing with Microsoft Project's
         // stored dates rather than by the change being simulated.
-        if (dryRun && !session.MayReschedule)
+        if (dryRun && !session.MayReschedule && !Analysis.Scheduler.UsesProject)
         {
             Analysis.CpmScheduler.Run(target);
         }
@@ -103,6 +108,7 @@ public static class WriteEngine
         // half-landed is a rejected operation, not a partial success.
         var applied = 0;
         var fieldsVerified = 0;
+        var appliedOps = new List<PendingOp>();
 
         foreach (var op in pending)
         {
@@ -130,6 +136,7 @@ public static class WriteEngine
             if (opFailures.Count == 0)
             {
                 applied++;
+                appliedOps.Add(op);
             }
             else
             {
@@ -141,10 +148,42 @@ public static class WriteEngine
         // only the fields that were touched. On an imported schedule the live document is left
         // exactly as Microsoft Project computed it — see ProjectSession.Authored.
         var rescheduled = false;
-        if (applied > 0 && (dryRun || session.MayReschedule))
+        string? engine = null;
+        var selfScheduled = appliedOps.Count > 0 && appliedOps.All(op => op.SchedulesItself);
+        if (selfScheduled)
         {
-            Analysis.CpmScheduler.Run(target);
             rescheduled = true;
+            engine = Analysis.Scheduler.Engine;
+        }
+        else if (applied > 0 && (dryRun || session.MayReschedule))
+        {
+            engine = Analysis.Scheduler.Run(target).Engine;
+            rescheduled = true;
+
+            // Microsoft Project applies its own rules when it calculates: a start typed onto a task
+            // with predecessors, a duration its assignment contradicts, a finish on an auto-scheduled
+            // task. Checked only before the calculation, such a write would be reported as applied
+            // and then quietly undone. So every applied operation is checked again against what
+            // Project left, and one it undid is reported as rejected, with the reason.
+            if (engine == Analysis.Scheduler.MicrosoftProject)
+            {
+                foreach (var op in appliedOps)
+                {
+                    var undone = op.Checks.Select(check => check(target)).Where(f => f is not null).ToList();
+                    if (undone.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    applied--;
+                    fieldsVerified -= op.Checks.Count;
+                    rejected.AddRange(undone.Select(f => f! with
+                    {
+                        Reason = "Microsoft Project recalculated this back when it scheduled the change. "
+                                 + f!.Reason,
+                    }));
+                }
+            }
         }
 
         var after = Snapshot.Capture(target);
@@ -165,11 +204,11 @@ public static class WriteEngine
             FieldsVerified = fieldsVerified,
             Rejected = rejected,
             Impact = MeasureImpact(before, after),
-            Notes = BuildNotes(dryRun, rescheduled, applied, session),
+            Notes = BuildNotes(dryRun, rescheduled, applied, session, engine),
         };
     }
 
-    private static string[] BuildNotes(bool dryRun, bool rescheduled, int applied, ProjectSession session)
+    private static string[] BuildNotes(bool dryRun, bool rescheduled, int applied, ProjectSession session, string? engine)
     {
         var notes = new List<string>();
 
@@ -178,22 +217,27 @@ public static class WriteEngine
             notes.Add(
                 "Dry run: applied to a throwaway copy of the schedule, measured, and discarded. "
                 + "Nothing was written to the open document.");
-
-            if (!session.MayReschedule)
-            {
-                notes.Add(
-                    "The impact is measured against this server's own critical-path engine on both "
-                    + "sides, so the movement shown is caused by your change. The absolute dates it "
-                    + "would produce differ from Microsoft Project's on an imported schedule.");
-            }
         }
-        else if (applied > 0 && !rescheduled)
+
+        if (rescheduled && engine == Analysis.Scheduler.MicrosoftProject)
+        {
+            notes.Add("Dates were calculated by Microsoft Project itself, so they are the dates Project shows.");
+        }
+        else if (rescheduled && dryRun && !session.MayReschedule)
         {
             notes.Add(
-                "Dates were not recalculated. This is an imported schedule, so its dates remain the "
-                + "ones Microsoft Project computed; Project will reschedule when it next opens the "
-                + "file. Only the fields written are reflected here. Call schedule_update with "
-                + "op='recalculate' to use this server's engine instead.");
+                "The impact is measured against this server's own critical-path engine on both "
+                + "sides, so the movement shown is caused by your change. The absolute dates it "
+                + "would produce differ from Microsoft Project's on an imported schedule — install "
+                + "Microsoft Project on this machine to have it calculate them instead.");
+        }
+        else if (!dryRun && applied > 0 && !rescheduled)
+        {
+            notes.Add(
+                "Dates were not recalculated. This is an imported schedule and Microsoft Project is not "
+                + "available here, so its dates remain the ones Project computed; Project will reschedule "
+                + "when it next opens the file. Only the fields written are reflected here. Call "
+                + "schedule_update with op='recalculate' to use this server's engine instead.");
         }
 
         return notes.ToArray();

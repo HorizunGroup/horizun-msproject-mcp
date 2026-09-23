@@ -17,6 +17,7 @@
 - [ ] `python tools/planning-test.py` (52)
 - [ ] `python tools/robustness-test.py` (34)
 - [ ] `python tools/packaging-test.py`
+- [ ] `python tools/project-engine-test.py` — on a machine with Microsoft Project, if scheduling or COM changed
 - [ ] Tried against a real schedule, not only a generated one
 
 ## Contract check

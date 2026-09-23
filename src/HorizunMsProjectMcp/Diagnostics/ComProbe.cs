@@ -131,33 +131,22 @@ public static class ComProbe
             return inspected;
         }
 
-        object? app = null;
+        if (Type.GetTypeFromProgID(ProgId, throwOnError: false) is null)
+        {
+            return inspected with
+            {
+                Available = false,
+                Status = "progid_unresolved",
+                Diagnosis = $"ProgID '{ProgId}' did not resolve to a type even though the CLSID is registered.",
+            };
+        }
+
         try
         {
-            var type = Type.GetTypeFromProgID(ProgId, throwOnError: false);
-            if (type is null)
-            {
-                return inspected with
-                {
-                    Available = false,
-                    Status = "progid_unresolved",
-                    Diagnosis = $"ProgID '{ProgId}' did not resolve to a type even though the CLSID is registered.",
-                };
-            }
-
-            app = Activator.CreateInstance(type);
-            if (app is null)
-            {
-                return inspected with
-                {
-                    Available = false,
-                    Status = "activation_returned_null",
-                    Diagnosis = "COM activation returned null without raising an error.",
-                };
-            }
-
-            var version = type.InvokeMember("Version", System.Reflection.BindingFlags.GetProperty, null, app, null);
-            var build = type.InvokeMember("Build", System.Reflection.BindingFlags.GetProperty, null, app, null);
+            // Through ProjectAutomation, which never hides or quits a Project the user already has
+            // open. Microsoft Project is single-instance, so "start it and shut it down again" would
+            // otherwise mean closing their copy — and their unsaved work with it.
+            var (version, build) = Backends.ProjectAutomation.Run(host => (host.Version, host.Build));
 
             return inspected with
             {
@@ -171,7 +160,13 @@ public static class ComProbe
         }
         catch (Exception ex)
         {
-            var hr = ex is COMException com ? com.HResult : ex.HResult;
+            var root = ex;
+            while (root is System.Reflection.TargetInvocationException { InnerException: { } inner })
+            {
+                root = inner;
+            }
+
+            var hr = root is COMException com ? com.HResult : root.HResult;
             var (diagnosis, repair) = Explain(hr, inspected.ExecutablePath);
 
             return inspected with
@@ -180,13 +175,9 @@ public static class ComProbe
                 Status = "launch_failed",
                 Launched = false,
                 HResult = $"0x{hr:X8}",
-                Diagnosis = diagnosis,
+                Diagnosis = root is Backends.McpToolException ? root.Message : diagnosis,
                 Repair = repair,
             };
-        }
-        finally
-        {
-            TryQuit(app);
         }
     }
 
@@ -268,35 +259,6 @@ public static class ComProbe
         {
             // A registry read failing is itself a "cannot determine" answer, not a crash.
             return null;
-        }
-    }
-
-    private static void TryQuit(object? app)
-    {
-        if (app is null)
-        {
-            return;
-        }
-
-        try
-        {
-            // 0 = pjDoNotSave. We opened it to look, not to change anything.
-            app.GetType().InvokeMember("Quit", System.Reflection.BindingFlags.InvokeMethod, null, app, new object[] { 0 });
-        }
-        catch
-        {
-            // Best effort — a probe must never take the server down.
-        }
-        finally
-        {
-            try
-            {
-                Marshal.ReleaseComObject(app);
-            }
-            catch
-            {
-                // Ditto.
-            }
         }
     }
 }

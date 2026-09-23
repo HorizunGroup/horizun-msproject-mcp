@@ -45,11 +45,12 @@ Full per-client instructions, including the plugin route and uninstall, are in
 
 There are a handful of Microsoft Project MCP servers. Every one of them requires Java, or a
 licensed Microsoft Project install, or a paid JDBC driver — and on the machine this was built on,
-**none of them would start**. Seven things here are not available anywhere else:
+**none of them would start**. Eight things here are not available anywhere else:
 
 | | |
 |---|---|
 | **Zero prerequisites** | A single .NET binary. MPXJ is compiled to .NET through IKVM, so there is no JVM anywhere in the picture, and no Microsoft Project either. |
+| **Microsoft Project's dates, not an imitation** | Where Project is installed, Project itself calculates every date this server reports. On seven real schedules — 8,823 tasks — recalculations and edits made through it matched Project on every task, to the minute. [How.](#dates-microsoft-projects-own) |
 | **Verified writes** | Microsoft Project silently ignores writes all the time — auto-scheduled dates, hard constraints, summary rollups, calculated costs. Nothing here is reported as applied until it has been read back out of the model and matched. |
 | **DCMA 14-point assessment** | The industry standard for judging whether a schedule can be run on. The Primavera servers implement it; none of the Microsoft Project ones do. Check 12 genuinely injects a 600-day delay and measures what moves. |
 | **It recovers logic nobody linked** | A schedule laid out correctly on the bar chart but never linked is the most common defect there is: DCMA flags it, nothing fixes it. The dates already state the order — this reads it back out, verifies the same order holds across every repetition, and proposes the missing links. |
@@ -172,43 +173,64 @@ A baseline is the record of the original plan that every variance is measured ag
 cannot be recovered from the file afterwards.
 
 Everything else — scheduling, recalculation, dry-run simulation, rescheduling incomplete work, the
-DCMA Critical Path Test — is served by this server's own critical-path engine and works on both
-backends.
+DCMA Critical Path Test — works everywhere. Who computes the dates is the next section.
 
-## The critical-path engine — and what it is not
+## Dates: Microsoft Project's own
 
-MPXJ reads and writes schedule files but does not *schedule* them: a task created through it has no
-dates at all. So there is a real CPM engine here — forward pass, backward pass, total and free
-float, critical flags — honouring relationship types, lag, constraints, deadlines, actual dates, and
-the working calendar per task (six-day site weeks, night shifts, exceptions you add with
-`calendars_write`). Without it, dates, float, earned value and every impact figure would be empty on
-any schedule this server authored.
+**Where Microsoft Project is installed, Microsoft Project calculates the dates.** Recalculating,
+rescheduling after a write, dry runs, recovery options, target dates and the DCMA Critical Path Test
+all hand the schedule to Project, let it calculate, and take back the dates it computed.
+`project_health` reports it as `schedulingEngine: microsoft-project`.
 
-> ### ⚠️ It is not Microsoft Project's scheduler
+Measured, not assumed. On seven real construction schedules — 21 to 5,984 tasks, 8,823 in all counting
+summaries, with split tasks, work in progress, 9-hour days and Saturday half-days — recalculating
+through this server reproduced the dates Microsoft Project computes on **every task of every
+schedule, to the minute**, and left progress exactly as Project had it. Writes were held
+to the same standard: a duration change, a percent complete or a new link made through this server
+and the same edit made by hand in Project produced the same dates and the same progress, task for
+task, summaries included.
+
+That took more than opening the file in Project. Project's own XML import does not reproduce Project:
+on a real 126-task schedule, re-opening even Project's **own** XML export put every task on different
+dates. These are the causes, and the hand-off to Project handles each:
+
+- **Unassigned tasks.** A task with no resource still carries a placeholder assignment, and on import
+  Project schedules it against the placeholder resource's calendar instead of the task's. It is left
+  out whenever it carries nothing the task does not already say.
+- **Split tasks.** Work that starts, pauses and resumes keeps its gaps only in the assignment's
+  day-by-day work, so that travels too.
+- **Work in progress.** An in-progress task comes back from an XML import with part of its completed
+  work moved into remaining. So progress is never taken back from that trip; when a write changes it,
+  it changes by Project's own rules — a longer duration keeps the work already done, a new percent
+  starts or finishes the task — and summaries roll it up the way Project does.
+- **Blank rows.** A row inserted in Project and left empty is not a task to Project, but it reads as
+  one dated at the project start, and a summary on a real schedule grew back two years to reach it.
+  It goes over as the blank row it is.
+
+A recalculation of the 4,753-task schedule takes about 20 seconds, most of it inside Project.
+
+**If you have Project open**, it is used as it is. Microsoft Project is single-instance — any
+automation, this server's included, lands in the copy you are using — so this server never hides
+your window, never recalculates or closes your documents, and only ever touches a temporary copy it
+opened itself, checking before every step that the active document is still that copy. You are left
+on the document you had active.
+
+### Without Microsoft Project
+
+MPXJ reads and writes schedule files but does not *schedule* them, so there is also a critical-path
+engine of its own — forward and backward pass, total and free float, all four relation types, lag,
+constraints, deadlines, actual dates, and each task's working calendar. It is what runs on macOS,
+Linux, and Windows machines without Project.
+
+> ### ⚠️ That engine is not Microsoft Project's scheduler
 >
-> **This engine reproduces Microsoft Project exactly on schedules built through this server. It does
-> not reproduce it on real imported schedules.** Measured against four production construction
-> files, recalculating reproduced Microsoft Project's own start dates on 100% of tasks in one
-> schedule, 69% in another, and around 23% in two more — where most of the remainder moved by a week
-> or more.
->
-> Microsoft Project's scheduler has behaviours this engine does not implement: task types
-> (fixed units, duration or work), effort-driven scheduling, resource calendars driving dates,
-> manually scheduled tasks, split tasks, and elapsed durations. On a schedule that uses them, our
-> dates will differ.
->
-> **So imported schedules are never silently rescheduled.** Open a `.mpp` and its dates stay exactly
-> as Microsoft Project computed them; a write reports what it changed and says plainly that dates
-> were not recalculated. If you want this engine's dates instead, ask for them explicitly with
-> `schedule_update op='recalculate'` — which warns you first, and after which the document is ours
-> rather than Project's.
->
-> Reading, querying, analysis, DCMA-14 and earned value all run on Microsoft Project's own dates and
-> are unaffected. A dry run measures its impact against this engine on both sides, so the movement
-> it reports is caused by your change rather than by the two engines disagreeing.
->
-> If Microsoft Project is installed, `project_health` reports the COM backend and you can hand the
-> file back to Project itself for a native save.
+> It reproduces Project exactly on schedules built through this server, not on real imported ones:
+> on four production files it matched Project's own start dates on 100%, 69%, 23% and 23% of tasks.
+> It does not implement task types, effort-driven scheduling, resource-driven dates, manual or split
+> tasks, or elapsed durations. So without Project, an imported schedule is never silently
+> rescheduled — its dates stay Project's until you ask for this engine's explicitly with
+> `schedule_update op='recalculate'`, which warns you first. Reading, analysis, DCMA-14 and earned
+> value run on the dates the file already holds and are unaffected.
 
 ---
 
@@ -242,10 +264,14 @@ python tools/planning-test.py     # 52 checks, reprogramming and learning
 python tools/robustness-test.py   # 34 checks, concurrency and hostile input
 python tools/smoke-test.py        # 13 checks, environment and capabilities
 python tools/packaging-test.py    # 33 checks, the metadata every client reads
+python tools/project-engine-test.py  # 20 checks, Microsoft Project as the engine (needs Project)
 ```
 
-**242 checks**, driven over real JSON-RPC against the running server, on Windows and on
-Linux. The Linux job is the evidence for the headline claim: it runs on a machine with no
+**262 checks**, driven over real JSON-RPC against the running server, on Windows and on
+Linux. With Microsoft Project installed the suites run with Project calculating the dates, and
+`project-engine-test.py` compares the server against Project doing the same thing by hand — dates,
+progress and summaries, task by task — and checks that a Project you have open is left exactly as it
+was. The Linux job is the evidence for the headline claim: it runs on a machine with no
 JVM and no Microsoft Project.
 
 The acceptance suite builds a construction schedule from nothing and asserts the contracts above:
@@ -307,6 +333,7 @@ tools/
   robustness-test.py   concurrency, malformed input, resource limits, 34 checks
   smoke-test.py        environment and capability matrix, 13 checks
   packaging-test.py    versions, identifiers and client manifests agree, 33 checks
+  project-engine-test.py  Microsoft Project as the engine, against Project by hand, 20 checks
 ```
 
 Design rationale and the market benchmark that motivated it: [DESIGN-TOOL-SURFACE.md](DESIGN-TOOL-SURFACE.md)

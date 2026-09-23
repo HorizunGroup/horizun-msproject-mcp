@@ -357,8 +357,11 @@ public static class RecoveryPlanner
                             continue;
                         }
 
+                        var previous = task.Duration;
                         task.Duration = MPXJ.Net.Duration.GetInstance(
                             Math.Max(1, Math.Round(days.Value * 0.75, 1)), TimeUnit.Days);
+                        // Compress what remains, keeping the work already done, as Project would.
+                        Writes.ProgressRules.DurationChanged(clone, task, previous);
                     }
                 }));
         }
@@ -377,15 +380,22 @@ public static class RecoveryPlanner
     {
         var clone = MpxjBackend.Clone(project);
 
-        // Bring the copy onto our engine's own baseline first, so the recovery measured is caused
-        // by the lever rather than by our engine disagreeing with Microsoft Project's stored dates.
-        CpmScheduler.Run(clone);
+        // With the internal engine, bring the copy onto that engine's own baseline first, so the
+        // recovery measured is caused by the lever rather than by the engine disagreeing with
+        // Microsoft Project's stored dates. When Project itself schedules, the stored dates already
+        // are its dates — measured identical on seven real schedules — so that pass would be a wasted
+        // trip through Project.
+        if (!Scheduler.UsesProject)
+        {
+            CpmScheduler.Run(clone);
+        }
+
         var before = MpxjBackend.ProjectFinish(clone) ?? baselineFinish;
         var beforeDates = ScheduleAnalyzer.Leaves(clone)
             .ToDictionary(t => t.UniqueID!.Value, t => t.Start);
 
         mutate(clone);
-        CpmScheduler.Run(clone);
+        Scheduler.Run(clone);
 
         var after = MpxjBackend.ProjectFinish(clone) ?? before;
         var calendar = new WorkingCalendar(clone);

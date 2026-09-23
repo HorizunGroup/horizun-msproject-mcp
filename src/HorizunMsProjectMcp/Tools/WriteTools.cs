@@ -169,7 +169,7 @@ public static class WriteTools
                             var created = parent is null ? project.AddTask() : parent.AddTask();
                             EnsureUniqueId(project, created);
                             created.Name = op.Name ?? "New task";
-                            ApplyFields(created, op, rejected, current, isNew: true);
+                            ApplyFields(project, created, op, rejected, current, isNew: true);
                             GiveDatesIfMissing(project, created);
 
                             var newUid = created.UniqueID;
@@ -206,7 +206,7 @@ public static class WriteTools
                                 continue;
                             }
 
-                            ApplyFields(task, op, rejected, current, isNew: false);
+                            ApplyFields(project, task, op, rejected, current, isNew: false);
                             break;
                         }
 
@@ -297,6 +297,8 @@ public static class WriteTools
                     }
                 }
 
+                // Any of these ops can change detail-task progress; summaries show it rolled up.
+                ProgressRules.RollUp(project);
                 return pending;
             });
     });
@@ -359,7 +361,7 @@ public static class WriteTools
     }
 
     private static void ApplyFields(
-        MPXJ.Net.Task task, TaskOp op,
+        ProjectFile project, MPXJ.Net.Task task, TaskOp op,
         List<RejectedWrite> rejected, PendingOp pending, bool isNew)
     {
         var uid = task.UniqueID ?? -1;
@@ -380,7 +382,9 @@ public static class WriteTools
             else
             {
                 var parsed = MpxjMapper.ParseDuration(op.Duration);
+                var previous = task.Duration;
                 task.Duration = parsed;
+                Writes.ProgressRules.DurationChanged(project, task, previous);
                 var expected = MpxjMapper.Days(parsed);
                 Verify(pending, uid, "duration", op.Duration,
                     t => MpxjMapper.Days(t.Duration) is { } d && expected is not null
@@ -405,6 +409,7 @@ public static class WriteTools
         if (op.PercentComplete is not null)
         {
             task.PercentageComplete = op.PercentComplete.Value;
+            Writes.ProgressRules.PercentChanged(project, task);
             Verify(pending, uid, "percentComplete", op.PercentComplete,
                 t => t.PercentageComplete, "Percent complete did not survive the write.");
         }
@@ -747,6 +752,12 @@ public static class WriteTools
                             pending.Add(current);
                             var resource = project.AddResource();
                             resource.Name = op.Name ?? "New resource";
+                            // As in Project: a new resource works the project's calendar. Left without
+                            // one, Microsoft Project gives it its own default base calendar — which is
+                            // locale-dependent (9:00-13:00, 15:00-19:00 on a Spanish install) — and
+                            // every task it is assigned to moves to those hours.
+                            var resourceCalendar = resource.AddCalendar();
+                            resourceCalendar.Parent = project.DefaultCalendar;
                             if (op.MaxUnits is not null) resource.Set(ResourceField.MaxUnits, op.MaxUnits);
                             if (op.Type is not null && Enum.TryParse<ResourceType>(op.Type, true, out var rt))
                             {
@@ -1184,12 +1195,12 @@ public static class WriteTools
 
                     case "recalculate":
                     {
-                        var current = new PendingOp { Label = "recalculate" };
+                        var current = new PendingOp { Label = "recalculate", SchedulesItself = true };
                         pending.Add(current);
 
                         // Asking for a recalculation is the authorisation. From here on this document
                         // is scheduled by our engine, so later writes may reschedule it too.
-                        if (!session.MayReschedule)
+                        if (!session.MayReschedule && !Analysis.Scheduler.UsesProject)
                         {
                             session.RescheduleAuthorised = true;
                             rejected.Add(new RejectedWrite
@@ -1204,7 +1215,7 @@ public static class WriteTools
                             });
                         }
 
-                        var report = Analysis.CpmScheduler.Run(project);
+                        var report = Analysis.Scheduler.Run(project);
                         current.Checks.Add(file =>
                             file.Tasks.Any(t => !t.Summary && t.Start is not null)
                                 ? null
@@ -1224,7 +1235,7 @@ public static class WriteTools
 
                     case "reschedule_incomplete":
                     {
-                        var current = new PendingOp { Label = "reschedule_incomplete" };
+                        var current = new PendingOp { Label = "reschedule_incomplete", SchedulesItself = true };
                         pending.Add(current);
 
                         var asOf = QueryTools.ParseDate(statusDate)
@@ -1255,7 +1266,7 @@ public static class WriteTools
                             moved++;
                         }
 
-                        Analysis.CpmScheduler.Run(project);
+                        Analysis.Scheduler.Run(project);
 
                         var expected = moved;
                         var cutoff = asOf;

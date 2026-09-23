@@ -17,6 +17,9 @@ public sealed record HealthReport
     public required string Server { get; init; }
     public required string Version { get; init; }
     public required string Backend { get; init; }
+
+    /// <summary>Who computes dates: "microsoft-project" (Project itself, exact) or "internal-cpm".</summary>
+    public required string SchedulingEngine { get; init; }
     public required RuntimeInfo Runtime { get; init; }
     public required SessionInfo Sessions { get; init; }
     public required ComProbeResult MicrosoftProject { get; init; }
@@ -69,6 +72,7 @@ public static class EnvironmentDoctor
             Server = ServerName,
             Version = ServerVersion,
             Backend = backend.ToString().ToLowerInvariant(),
+            SchedulingEngine = Analysis.Scheduler.Engine,
             Runtime = DescribeRuntime(),
             Sessions = DescribeSessions(),
             MicrosoftProject = project,
@@ -118,7 +122,8 @@ public static class EnvironmentDoctor
             ["schedule_qa"] = true,        // DCMA-14 runs on our own analysis
             ["timephased"] = true,         // spread computed from the schedule, not read from a contour
 
-            // Served by this server's own critical-path engine, so they hold on both backends.
+            // Served by Microsoft Project where it is installed, by the internal engine elsewhere —
+            // so they hold everywhere, and schedulingEngine says which answered.
             ["recalculate"] = true,
             ["dry_run_simulation"] = true, // a real copy-apply-recalc-diff, not a static guess
             ["reschedule_incomplete"] = true,
@@ -128,7 +133,7 @@ public static class EnvironmentDoctor
             // is Microsoft Project's own heuristic rather than a published algorithm.
             ["write_native_mpp"] = canWriteMpp,
             ["level_resources"] = com,
-            ["native_engine"] = com,       // Microsoft Project's scheduler rather than ours
+            ["native_engine"] = Analysis.Scheduler.UsesProject, // dates are Project's own, not an imitation
         };
     }
 
@@ -136,12 +141,23 @@ public static class EnvironmentDoctor
     {
         var notes = new List<string>();
 
-        if (backend == Backend.Mpxj)
+        if (Analysis.Scheduler.UsesProject)
         {
             notes.Add(
-                "Running on the MPXJ backend: reads and writes schedules with no Java runtime, "
-                + "no Microsoft Project, and no licence. Dates, float and the critical path are "
-                + "computed by this server's own critical-path engine.");
+                "Dates are calculated by Microsoft Project itself: recalculations, rescheduling after a "
+                + "write, dry runs, recovery options, target dates and the DCMA Critical Path Test all "
+                + "hand the schedule to Project and take back the dates it computes. They are the dates "
+                + "Project shows. If you have Project open, it is used as-is: your window stays visible, "
+                + "your documents are never recalculated or closed, and only a temporary copy is touched.");
+        }
+        else
+        {
+            notes.Add(
+                "Dates, float and the critical path are computed by this server's own critical-path "
+                + "engine, because Microsoft Project is not available here. It is not Project's scheduler: "
+                + "on imported schedules that use task types, effort-driven or resource-driven dates, "
+                + "manual or split tasks, its dates can differ. Install Microsoft Project on this machine "
+                + "to have Project calculate them instead.");
         }
 
         if (!deep && project.Available)

@@ -105,24 +105,7 @@ public static class MpxjBackend
                 "project_health with deep=true for the diagnosis and repair steps.");
         }
 
-        var staging = Path.Combine(Path.GetTempPath(), $"hzpm-mpp-{Guid.NewGuid():N}.xml");
-        try
-        {
-            new MSPDIWriter().Write(project, staging);
-            ComBridge.SaveAsMpp(staging, path);
-        }
-        finally
-        {
-            try
-            {
-                File.Delete(staging);
-            }
-            catch
-            {
-                // A leftover temp file is not worth failing the save over.
-            }
-        }
-
+        ComBridge.SaveAsMpp(project, path);
         return path;
     }
 

@@ -37,12 +37,13 @@ Las instrucciones completas por cliente están en [docs/INSTALL.md](docs/INSTALL
 ## Por qué este
 
 Hay varios MCP de Microsoft Project. Todos exigen Java, o un Microsoft Project licenciado, o un
-driver JDBC de pago — y en la máquina donde se construyó este, **ninguno arrancó**. Siete cosas de
+driver JDBC de pago — y en la máquina donde se construyó este, **ninguno arrancó**. Ocho cosas de
 aquí no existen en ningún otro:
 
 | | |
 |---|---|
 | **Cero prerrequisitos** | Un solo binario .NET. MPXJ está compilado a .NET con IKVM, así que no hay JVM en ninguna parte, ni Microsoft Project tampoco. |
+| **Las fechas de Project, no una imitación** | Donde Project está instalado, el propio Project calcula cada fecha que reporta este servidor. En siete cronogramas reales — 8.823 tareas — los recálculos y las ediciones hechos a través de él coincidieron con Project en todas las tareas, al minuto. [Cómo.](#las-fechas-las-de-microsoft-project) |
 | **Escrituras verificadas** | Microsoft Project ignora escrituras en silencio todo el tiempo: fechas autoprogramadas, restricciones duras, resúmenes calculados, costos derivados. Aquí nada se reporta como aplicado hasta releerlo del modelo y compararlo. |
 | **Evaluación DCMA de 14 puntos** | El estándar de la industria para decidir si un cronograma es ejecutable. Los MCP de Primavera lo implementan; ninguno de los de Microsoft Project. El chequeo 12 inyecta de verdad un atraso de 600 días y mide qué se movió. |
 | **Recupera la lógica que nadie enlazó** | Un cronograma bien dibujado en la barra pero sin vínculos es el defecto más común que existe: DCMA lo señala y nadie lo arregla. Las fechas ya declaran el orden — esto lo lee de vuelta, verifica que el mismo orden se repita en cada repetición, y propone los vínculos faltantes. |
@@ -148,35 +149,64 @@ Guardar encima de una línea base que ya tiene datos también se rechaza, salvo 
 explícitamente. La línea base es el registro del plan original contra el que se mide toda variación,
 y después no se puede recuperar del archivo.
 
-## El motor de ruta crítica — y lo que no es
+## Las fechas: las de Microsoft Project
 
-MPXJ lee y escribe archivos de cronograma pero no los *programa*: una tarea creada a través de él no
-tiene fechas. Así que aquí hay un motor CPM de verdad — pasada hacia adelante, pasada hacia atrás,
-holgura total y libre, marcas de criticidad — respetando tipos de relación, retrasos, restricciones,
-fechas límite, fechas reales y el calendario laboral por tarea (semanas de seis días, turnos noche,
-excepciones que agregas con `calendars_write`).
+**Donde Microsoft Project está instalado, las fechas las calcula Microsoft Project.** Recalcular,
+reprogramar después de una escritura, las corridas en seco, las opciones de recuperación, las fechas
+objetivo y la prueba de ruta crítica del DCMA le entregan el cronograma a Project, lo dejan calcular
+y toman de vuelta las fechas que él calculó. `project_health` lo reporta como
+`schedulingEngine: microsoft-project`.
 
-> ### ⚠️ No es el programador de Microsoft Project
+Medido, no supuesto. En siete cronogramas reales de obra — de 21 a 5.984 tareas, 8.823 en total
+contando resúmenes, con tareas divididas, trabajo en curso, jornadas de 9 horas y medio sábado —
+recalcular a través de este servidor reprodujo las fechas que calcula Microsoft Project en **todas las
+tareas de todos los cronogramas, al minuto**, y dejó el avance exactamente como lo tenía Project. Las escrituras se midieron igual: un cambio de duración, un porcentaje de avance o un
+vínculo nuevo hecho por este servidor, y el mismo cambio hecho a mano en Project, dieron las mismas
+fechas y el mismo avance tarea por tarea, resúmenes incluidas.
+
+Llegar ahí exigió más que abrir el archivo en Project. La importación de XML del propio Project no
+reproduce a Project: en un cronograma real de 126 tareas, volver a abrir incluso **su propia**
+exportación XML puso todas las tareas en otras fechas. Estas son las causas, y la entrega a Project
+resuelve cada una:
+
+- **Tareas sin recurso.** Una tarea sin recurso igual lleva una asignación de relleno, y al importarla
+  Project la programa con el calendario de ese recurso de relleno en vez del de la tarea. Se omite
+  cuando no dice nada que la tarea no diga ya.
+- **Tareas divididas.** El trabajo que empieza, se pausa y sigue guarda sus pausas solo en el reparto
+  día por día de la asignación, así que ese reparto viaja también.
+- **Trabajo en curso.** Una tarea en curso vuelve de la importación XML con parte de lo trabajado
+  pasado a lo restante. Por eso el avance nunca se toma de ese viaje: cuando una escritura lo cambia,
+  cambia con las reglas de Project — una duración mayor conserva lo ya trabajado, un porcentaje nuevo
+  arranca o termina la tarea — y las resúmenes lo consolidan como lo hace Project.
+- **Filas en blanco.** Una fila insertada en Project y dejada vacía no es una tarea para Project, pero se
+  lee como una fechada al inicio del proyecto, y una resumen de un cronograma real creció dos años hacia
+  atrás para alcanzarla. Viaja como la fila en blanco que es.
+
+Recalcular el cronograma de 4.753 tareas toma unos 20 segundos, casi todo dentro de Project.
+
+**Si tienes Project abierto**, se usa tal como está. Microsoft Project es de instancia única —
+cualquier automatización, incluida la de este servidor, cae en la copia que estás usando —, así que
+este servidor nunca oculta tu ventana, nunca recalcula ni cierra tus documentos, y solo toca una copia
+temporal que abrió él mismo, verificando antes de cada paso que el documento activo siga siendo esa
+copia. Quedas en el documento que tenías activo.
+
+### Sin Microsoft Project
+
+MPXJ lee y escribe archivos de cronograma pero no los *programa*, así que también hay un motor de ruta
+crítica propio — pasada hacia adelante y hacia atrás, holgura total y libre, los cuatro tipos de
+relación, retrasos, restricciones, fechas límite, fechas reales y el calendario de cada tarea. Es el
+que corre en macOS, Linux y los Windows sin Project.
+
+> ### ⚠️ Ese motor no es el programador de Microsoft Project
 >
-> **Este motor reproduce a Microsoft Project exactamente en cronogramas construidos con este
-> servidor. No lo reproduce en cronogramas reales importados.** Medido contra cuatro archivos de
-> obra en producción, recalcular reprodujo las fechas de inicio del propio Microsoft Project en el
-> 100% de las tareas de un cronograma, el 69% en otro, y alrededor del 23% en dos más — donde la
-> mayor parte del resto se movió una semana o más.
->
-> El programador de Microsoft Project tiene comportamientos que este motor no implementa: tipos de
-> tarea (unidades, duración o trabajo fijos), programación condicionada por el esfuerzo, calendarios
-> de recurso que mandan sobre las fechas, tareas programadas manualmente, tareas divididas y
-> duraciones transcurridas. En un cronograma que los use, nuestras fechas van a diferir.
->
-> **Por eso un cronograma importado nunca se reprograma en silencio.** Abre un `.mpp` y sus fechas
-> se quedan exactamente como las calculó Microsoft Project; una escritura reporta qué cambió y dice
-> claramente que las fechas no se recalcularon. Si quieres las fechas de este motor, pídelas
-> explícitamente y el servidor te advierte primero — después de eso el documento es nuestro y no de
-> Project.
->
-> Lectura, consultas, análisis, DCMA-14 y valor ganado corren todos sobre las fechas del propio
-> Microsoft Project y no se ven afectados.
+> Reproduce a Project exactamente en cronogramas construidos con este servidor, no en los importados:
+> en cuatro archivos reales coincidió con las fechas de inicio de Project en el 100%, 69%, 23% y 23% de
+> las tareas. No implementa tipos de tarea, programación condicionada por el esfuerzo, fechas
+> impulsadas por recursos, tareas manuales o divididas, ni duraciones transcurridas. Por eso, sin
+> Project, un cronograma importado nunca se reprograma en silencio — sus fechas siguen siendo las de
+> Project hasta que pidas las de este motor explícitamente con `schedule_update op='recalculate'`, que
+> te advierte primero. La lectura, el análisis, el DCMA-14 y el valor ganado corren sobre las fechas
+> que el archivo ya trae y no se ven afectados.
 
 ---
 
@@ -190,10 +220,14 @@ python tools/planning-test.py     # 52 chequeos, reprogramación y aprendizaje
 python tools/robustness-test.py   # 34 chequeos, concurrencia y entrada hostil
 python tools/smoke-test.py        # 13 chequeos, entorno y capacidades
 python tools/packaging-test.py    # 33 chequeos, la metadata que lee cada cliente
+python tools/project-engine-test.py  # 20 chequeos, Microsoft Project como motor (requiere Project)
 ```
 
-**242 chequeos**, ejecutados sobre JSON-RPC real contra el servidor corriendo, en Windows y en
-Linux. El trabajo de Linux es la evidencia de la afirmación de portada: corre en una máquina sin JVM
+**262 chequeos**, ejecutados sobre JSON-RPC real contra el servidor corriendo, en Windows y en
+Linux. Con Microsoft Project instalado, las suites corren con Project calculando las fechas, y
+`project-engine-test.py` compara el servidor contra Project haciendo lo mismo a mano — fechas, avance
+y resúmenes, tarea por tarea — y verifica que un Project que tengas abierto quede exactamente como
+estaba. El trabajo de Linux es la evidencia de la afirmación de portada: corre en una máquina sin JVM
 y sin Microsoft Project.
 
 La suite de robustez es la que importa para confiar en esto con un cliente real: cuarenta

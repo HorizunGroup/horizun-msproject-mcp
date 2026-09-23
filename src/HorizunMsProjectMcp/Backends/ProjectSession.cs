@@ -32,7 +32,12 @@ public sealed class ProjectSession
     /// <summary>Set once the caller has explicitly asked for our engine on this document.</summary>
     public bool RescheduleAuthorised { get; set; }
 
-    public bool MayReschedule => Authored || RescheduleAuthorised;
+    /// <remarks>
+    /// Where Microsoft Project calculates the dates, an imported schedule is rescheduled after a write
+    /// exactly as Project would reschedule it — the dates stay Project's. Only the internal engine,
+    /// which does not reproduce Project on imported schedules, needs the user's say-so first.
+    /// </remarks>
+    public bool MayReschedule => Authored || RescheduleAuthorised || Analysis.Scheduler.UsesProject;
     public DateTime OpenedAt { get; } = DateTime.UtcNow;
 
     private readonly SemaphoreSlim _gate = new(1, 1);

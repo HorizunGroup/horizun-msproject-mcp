@@ -470,7 +470,7 @@ public static class PlanningTools
             }
         }
 
-        var report = CpmScheduler.Run(project);
+        var report = Scheduler.Run(project);
         session.Dirty = true;
 
         var notes = new List<string>

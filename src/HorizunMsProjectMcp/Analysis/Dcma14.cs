@@ -293,8 +293,13 @@ public static class Dcma14
             }
 
             var original = MpxjMapper.Days(target.Duration) ?? 0;
+            var previous = target.Duration;
             target.Duration = MPXJ.Net.Duration.GetInstance(original + injectedDays, TimeUnit.Days);
-            CpmScheduler.Run(sandbox);
+            // On a task already under way the delay has to land in its remaining work, as it would
+            // in Project; otherwise Microsoft Project keeps the old remaining duration and the
+            // injected delay simply disappears.
+            Writes.ProgressRules.DurationChanged(sandbox, target, previous);
+            Scheduler.Run(sandbox);
 
             var after = MpxjBackend.ProjectFinish(sandbox);
 

@@ -11,10 +11,19 @@ That needs the [.NET 8 SDK](https://dotnet.microsoft.com/download). It puts
 `horizun-msproject-mcp` on your PATH, in `~/.dotnet/tools`. To upgrade later,
 `dotnet tool update -g HorizunMsProjectMcp`.
 
-Windows, macOS and Linux all work. Two things are Windows-only, because they are
-Windows-only in the world: writing a native `.mpp` (which drives a licensed
-Microsoft Project through COM) and the COM half of `project_health`. Reading
-`.mpp` needs neither and works everywhere.
+**Install Microsoft Project on the same machine if you want Project's dates.** Where
+it is installed, Microsoft Project itself calculates every date this server reports —
+recalculations, rescheduling after an edit, dry runs, recovery options. Without it, a
+built-in engine does, and on real imported schedules its dates can differ from
+Project's. `project_health` says which one is answering (`schedulingEngine`).
+
+You can keep using Project while the server works. Project only runs one copy at a
+time, so the server works inside yours: it never hides your window, never recalculates
+or closes your documents, and only touches a temporary copy it opens itself.
+
+Windows, macOS and Linux all work for reading, analysis and the built-in engine.
+Microsoft Project exists only on Windows, so its dates and writing a native `.mpp`
+are Windows-only.
 
 ## Which client needs what
 
@@ -104,6 +113,17 @@ publishes a tool surface that reads and writes project files to whoever can
 reach the URL, so the tunnel needs authentication, and a public no-auth endpoint
 is not an acceptable shortcut. Claude Desktop, Claude Code and Codex all run the
 server locally and need none of this.
+
+## Configuration
+
+Environment variables, set in the client's configuration for the server (the `env` block in
+`.mcp.json`, or the extension's settings):
+
+| Variable | Default | What it does |
+|---|---|---|
+| `HORIZUN_MSPROJECT_ENGINE` | `auto` | `project` forces Microsoft Project to calculate dates, `internal` forces the built-in engine, `auto` uses Project wherever it is installed. |
+| `HORIZUN_MSPROJECT_COM_TIMEOUT_SECONDS` | `300` | How long one Project session may take before it counts as stuck — most often behind a dialog nobody can see. Raise it for very large schedules on slow machines. |
+| `HORIZUN_MSPROJECT_DEBUG_DIR` | — | A folder where each calculation leaves the file handed to Project, the file it returned, and the timings. For diagnosing a date that looks wrong. |
 
 ## Verify it
 

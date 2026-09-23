@@ -1,128 +1,50 @@
-using System.Reflection;
-using System.Runtime.InteropServices;
-
 namespace Horizun.ProjectMcp.Backends;
 
 /// <summary>
-/// The COM accelerator: drives an installed Microsoft Project to do the things no library can.
+/// The things only an installed Microsoft Project can do, on top of <see cref="ProjectAutomation"/>.
 /// </summary>
-/// <remarks>
-/// Only used for capabilities the file backend genuinely cannot serve. Everything else stays on
-/// MPXJ, because COM means a licensed Windows install and a visible application — a dependency
-/// worth paying only where it buys something real.
-/// </remarks>
 public static class ComBridge
 {
-    private const string ProgId = "MSProject.Application";
-
     /// <summary>
-    /// Writes a genuine binary .mpp by having Microsoft Project open an intermediate MSPDI file
-    /// and save it in its own format. This is the only way the format can be authored at all.
+    /// Writes a genuine binary .mpp by having Microsoft Project open the schedule and save it in its
+    /// own format. This is the only way the format can be authored at all.
     /// </summary>
-    public static void SaveAsMpp(string sourceMspdiPath, string targetMppPath)
+    /// <remarks>
+    /// The schedule goes to Project through <see cref="ProjectHandoff"/>, not a plain MSPDI export:
+    /// a plain export saved this way came back with different durations on a real schedule, because
+    /// Project re-derives them from placeholder assignments and loses split tasks' gaps.
+    /// </remarks>
+    public static void SaveAsMpp(MPXJ.Net.ProjectFile project, string targetMppPath)
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            throw new McpToolException("Native .mpp can only be written on Windows, through Microsoft Project.");
-        }
-
-        object? app = null;
+        var token = $"hzpm-{Guid.NewGuid():N}";
+        var staging = Path.Combine(Path.GetTempPath(), token + ".xml");
         try
         {
-            var type = Type.GetTypeFromProgID(ProgId, throwOnError: false)
-                       ?? throw new McpToolException(
-                           "Microsoft Project is not registered for COM automation on this machine. "
-                           + "Run project_health with deep=true for the diagnosis and the repair steps.");
-
-            app = Activator.CreateInstance(type)
-                  ?? throw new McpToolException("Microsoft Project did not start.");
-
-            Set(app, "Visible", false);
-            Set(app, "DisplayAlerts", false);
-
-            Call(app, "FileOpen", Path.GetFullPath(sourceMspdiPath));
-
-            if (File.Exists(targetMppPath))
+            ProjectHandoff.Write(project, staging);
+            ProjectAutomation.Run(host =>
             {
-                File.Delete(targetMppPath);
-            }
-
-            // No FormatID: .mpp is Project's own default, and passing one is rejected as an
-            // invalid argument rather than honoured.
-            Call(app, "FileSaveAs", Path.GetFullPath(targetMppPath));
-            Call(app, "FileCloseEx", 0); // 0 = pjDoNotSave
-
-            if (!File.Exists(targetMppPath))
-            {
-                throw new McpToolException(
-                    $"Microsoft Project reported no error but '{targetMppPath}' was not created.");
-            }
+                host.Open(staging, token);
+                host.SaveMpp(token, targetMppPath);
+                host.Close(token);
+                return 0;
+            });
         }
-        catch (McpToolException)
+        catch (McpToolException ex)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Late binding wraps everything in TargetInvocationException; the useful message is
-            // always underneath it, and reporting the wrapper instead is how COM errors become
-            // undebuggable.
-            var root = ex;
-            while (root is TargetInvocationException { InnerException: { } inner })
-            {
-                root = inner;
-            }
-
             throw new McpToolException(
-                $"Microsoft Project could not write the .mpp: {root.Message} "
-                + $"({root.GetType().Name}). Write MSPDI instead (format='mspdi' — a .xml Microsoft "
-                + "Project opens natively), or run project_health with deep=true to check the COM server.");
-        }
-        finally
-        {
-            Quit(app);
-        }
-    }
-
-    private static void Set(object target, string property, object value)
-    {
-        try
-        {
-            target.GetType().InvokeMember(property, BindingFlags.SetProperty, null, target, new[] { value });
-        }
-        catch
-        {
-            // These are conveniences; a version that does not expose them is not a failure.
-        }
-    }
-
-    private static object? Call(object target, string method, params object[] args) =>
-        target.GetType().InvokeMember(method, BindingFlags.InvokeMethod, null, target, args);
-
-    private static void Quit(object? app)
-    {
-        if (app is null)
-        {
-            return;
-        }
-
-        try
-        {
-            Call(app, "Quit", 0);
-        }
-        catch
-        {
-            // Best effort.
+                $"Microsoft Project could not write the .mpp: {ex.Message} Write MSPDI instead "
+                + "(format='mspdi' — a .xml Microsoft Project opens natively), or run project_health with "
+                + "deep=true to check the COM server.");
         }
         finally
         {
             try
             {
-                Marshal.ReleaseComObject(app);
+                File.Delete(staging);
             }
             catch
             {
-                // Ditto.
+                // A leftover temp file is not worth failing the save over.
             }
         }
     }

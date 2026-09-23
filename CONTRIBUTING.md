@@ -13,9 +13,17 @@ python tools/planning-test.py
 python tools/robustness-test.py
 python tools/smoke-test.py
 python tools/packaging-test.py
+python tools/project-engine-test.py   # needs Windows and Microsoft Project; skips otherwise
 ```
 
 The first build translates MPXJ from Java with IKVM and takes several minutes. Later builds do not.
+
+On a machine with Microsoft Project the other suites run with Project as the scheduling engine,
+except `scheduler-test.py`, which pins the internal engine because that engine is what it tests.
+`project-engine-test.py` holds Project to its own standard: a schedule built from nothing, and edits
+made through the server, are compared task by task with Project doing the same thing by hand; and the
+server is checked to leave a Project the user has open exactly as it found it. CI has no Project, so
+there it skips — **run it locally before releasing anything that touches scheduling or COM.**
 
 `packaging-test.py` needs no build: it reads the metadata. Nine files repeat the version, the
 package id and the command name, and nothing else catches them drifting — the server still starts,
@@ -87,7 +95,7 @@ token GitHub mints for this repository and `release.yml` specifically.
 2. Add the release to `CHANGELOG.md`.
 3. `git tag v1.1.0 && git push origin v1.1.0`.
 
-The workflow runs all six suites before it packs anything and refuses to publish if the built
+The workflow runs every suite before it packs anything and refuses to publish if the built
 version does not match the tag. A version on NuGet cannot be deleted afterwards, only hidden, which
 is why nothing ships that has not passed everything first.
 
