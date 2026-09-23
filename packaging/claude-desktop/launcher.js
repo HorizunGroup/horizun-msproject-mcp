@@ -25,7 +25,7 @@ const COMMAND = 'horizun-msproject-mcp';
 // Kept equal to the manifest's version by scripts/build_mcpb.py, which refuses
 // to pack when the two disagree. An extension that installs a different server
 // than it advertises is worse than one that fails to build.
-const VERSION = '1.2.0';
+const VERSION = '1.2.1';
 
 const EXE = platform() === 'win32' ? `${COMMAND}.exe` : COMMAND;
 

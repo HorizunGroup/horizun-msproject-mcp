@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.1] — 2026-09-22
 
 ### Fixed
 
@@ -114,6 +114,7 @@ First public release. 25 tools, 209 automated checks.
 - Logic recovery from a schedule's own dates, schedule learning from finished
   projects, and a BIM bridge for 4D.
 
+[1.2.1]: https://github.com/HorizunGroup/horizun-msproject-mcp/releases/tag/v1.2.1
 [1.2.0]: https://github.com/HorizunGroup/horizun-msproject-mcp/releases/tag/v1.2.0
 [1.1.0]: https://github.com/HorizunGroup/horizun-msproject-mcp/releases/tag/v1.1.0
 [1.0.2]: https://github.com/HorizunGroup/horizun-msproject-mcp/releases/tag/v1.0.2

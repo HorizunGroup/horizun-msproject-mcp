@@ -9,7 +9,7 @@
       "description": "Audit, reschedule and author Microsoft Project schedules.",
       "author": {"name": "HorizunGroup"},
       "category": "development",
-      "source": {"source": "url", "url": "https://github.com/HorizunGroup/horizun-msproject-mcp.git", "ref": "v1.2.0"},
+      "source": {"source": "url", "url": "https://github.com/HorizunGroup/horizun-msproject-mcp.git", "ref": "v1.2.1"},
       "homepage": "https://github.com/HorizunGroup/horizun-msproject-mcp"
     }
   ]
