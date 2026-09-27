@@ -41,6 +41,13 @@ public sealed record RecoveryReport
     public required double WorstSlipDays { get; init; }
     public required IReadOnlyList<LateTask> Late { get; init; }
     public required IReadOnlyList<RecoveryOption> Options { get; init; }
+
+    /// <summary>Tasks a planner should re-plan, with the reasons and the move to make — see ReplanReview.</summary>
+    public IReadOnlyList<ReplanItem> ReplanReview { get; init; } = Array.Empty<ReplanItem>();
+
+    /// <summary>How many tasks each criterion flagged.</summary>
+    public IReadOnlyDictionary<string, int> ReplanCriteria { get; init; } = new Dictionary<string, int>();
+
     public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
 }
 
@@ -73,6 +80,7 @@ public static class RecoveryPlanner
         }
 
         var options = BuildOptions(project, leaves, statusDate, maxOptions, notes);
+        var review = Analysis.ReplanReview.Review(project, statusDate);
 
         if (late.Count == 0)
         {
@@ -96,6 +104,9 @@ public static class RecoveryPlanner
             WorstSlipDays = late.Count == 0 ? 0 : late.Max(l => l.SlipDays),
             Late = late.Take(100).ToList(),
             Options = options,
+            ReplanReview = review.Take(150).ToList(),
+            ReplanCriteria = review.SelectMany(r => r.Criteria).GroupBy(c => c)
+                .ToDictionary(g => g.Key, g => g.Count()),
             Notes = notes,
         };
     }
@@ -160,7 +171,7 @@ public static class RecoveryPlanner
     }
 
     /// <summary>How much of the network sits downstream of a task — its blast radius.</summary>
-    private static int CountDownstream(ProjectFile project, int uid)
+    internal static int CountDownstream(ProjectFile project, int uid)
     {
         var seen = new HashSet<int>();
         var stack = new Stack<int>();

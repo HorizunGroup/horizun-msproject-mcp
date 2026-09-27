@@ -27,6 +27,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`schedule_generate` builds from the model.** Pass the elements read from the Revit MCP inline
+  (`elements`: elementId, code, category, level, quantity, unit) — no export file — and get one task per
+  trade per level in construction sequence, start and finish milestones with nothing open-ended,
+  durations from `productivity` (by code, category or unit) or `defaultDays` marked as assumed, the
+  code in `codeField` for 4D, and every element tied to its task so `bim_sync` writes the 4D file.
+- **`schedule_recovery` reviews like a planner.** `replanReview` lists the tasks to re-plan at the
+  cut-off with the reasons and figures (not started when due, overdue, slower than its elapsed time,
+  behind baseline, negative float, started out of sequence) and the move to make.
 - `tools/export-fidelity-test.py`: round trip of a baselined schedule with a status date and finished,
   in-progress and unstarted tasks, safe on any machine; the native .mpp round trip is in
   `project-engine-test.py`.

@@ -1,3 +1,4 @@
+using Horizun.ProjectMcp.Bim;
 using System.ComponentModel;
 using Horizun.ProjectMcp.Analysis;
 using Horizun.ProjectMcp.Backends;
@@ -30,7 +31,11 @@ public static class PlanningTools
         + "overlapping finish-to-start hand-offs, compressing the longest critical tasks. "
         + "Every option is applied to a throwaway copy, rescheduled, and reported with the finish "
         + "date it genuinely produces; an option that recovers nothing says so rather than being "
-        + "offered as advice. Nothing is written to the open document.")]
+        + "offered as advice. Also returns replanReview: the tasks a planner should re-plan at this "
+        + "cut-off and why — not started when due, overdue, progressing slower than its elapsed time, "
+        + "drifting from its baseline, eating its float, started out of sequence — each with the figures "
+        + "behind it and the move to make. It proposes; the planner decides. Nothing is written to the "
+        + "open document.")]
     public static RecoveryReport ScheduleRecovery(
         [Description("Document handle from project_open.")] string handle,
         [Description("Status date, yyyy-MM-dd. Defaults to the project's own, then today.")]
@@ -204,17 +209,43 @@ public static class PlanningTools
 
     [McpServerTool(Name = "schedule_generate")]
     [Description(
-        "Build a new schedule from an activity library produced by schedule_learn. Each activity "
+        "Build a new schedule — from the model, or from past projects. FROM THE MODEL: pass 'elements' "
+        + "as read from the Revit MCP (elementId, code, category, level, quantity, unit — no file needed) "
+        + "and get one task per trade per level, in construction sequence, from a start to a finish "
+        + "milestone with nothing left open-ended; durations are quantity over 'productivity' where a rate "
+        + "is given (by code, category or unit) and 'defaultDays' where not, flagged as assumed; the code "
+        + "goes into 'codeField' and every element is tied to its task, ready for bim_sync to write the 4D "
+        + "dates. FROM PAST PROJECTS: pass 'libraryPath' from schedule_learn. Each activity "
         + "gets the duration its history says it takes, and the dependencies that usually surround "
         + "it are recreated between the activities you asked for. "
         + "Returns an open handle, so run schedule_qa on it before trusting it and adjust with "
         + "tasks_write — this is a first draft grounded in what actually happened on past projects, "
         + "not a finished programme.")]
     public static GenerateResult ScheduleGenerate(
-        [Description("Path to the library JSON from schedule_learn.")] string libraryPath,
         [Description("Path for the new schedule. Refuses to overwrite an existing file.")]
         string outputPath,
         [Description("Project start date, yyyy-MM-dd.")] string startDate,
+        [Description("Path to the library JSON from schedule_learn. Not needed when building from 'elements'.")]
+        string? libraryPath = null,
+        [Description(
+            "Model elements to build from, straight from the Revit MCP: [{elementId, code, category, family, "
+            + "type, level, quantity, unit}]. Grouped by code (or category when there is no code) per level.")]
+        BimElement[]? elements = null,
+        [Description("Or a file with the same elements (JSON array or CSV), when they come from an export.")]
+        string? elementsPath = null,
+        [Description(
+            "Productivity per day, keyed by code, category or unit, e.g. {\"m3\": 25, \"Muros\": 60}. "
+            + "Optional: without it durations are 'defaultDays' and marked as assumed.")]
+        Dictionary<string, double>? productivity = null,
+        [Description("Duration for work with no productivity rate, in days. Defaults to 1.")]
+        double defaultDays = 1,
+        [Description(
+            "Order of trades, as case-insensitive fragments of code or category, each may hold alternatives "
+            + "separated by '|', e.g. [\"cimenta\", \"column|viga\", \"losa\", \"muro\"]. Defaults to a "
+            + "standard building sequence.")]
+        string[]? sequence = null,
+        [Description("Task field that receives the element code for 4D, e.g. 'Text1'. Defaults to Text1.")]
+        string codeField = "Text1",
         [Description(
             "Activity keys to include, as listed in the library. Omit to use every activity in it.")]
         string[]? activities = null,
@@ -234,6 +265,20 @@ public static class PlanningTools
             + "instead of copied from history — the quantity is what changes between projects.")]
         Dictionary<string, double>? quantities = null)
     {
+        if (elements is { Length: > 0 } || !string.IsNullOrWhiteSpace(elementsPath))
+        {
+            return GenerateFromModel(outputPath, startDate, name,
+                elements is { Length: > 0 } ? elements : BimLinkStore.LoadElements(Guard.ExistingFile(elementsPath, "elementsPath")),
+                productivity, defaultDays, sequence, codeField);
+        }
+
+        if (string.IsNullOrWhiteSpace(libraryPath))
+        {
+            throw new McpToolException(
+                "Give either 'elements' (from the model — read them with the Revit MCP) or 'libraryPath' "
+                + "(from schedule_learn).");
+        }
+
         var library = ScheduleLibrary.Load(libraryPath);
         var start = QueryTools.ParseDate(startDate)
                     ?? throw new McpToolException("A start date is required, as yyyy-MM-dd.");
@@ -548,6 +593,51 @@ public static class PlanningTools
             Start = report.ProjectStart,
             Finish = report.ProjectFinish,
             Unmatched = unmatched,
+            Notes = notes,
+        };
+    }
+
+    private static GenerateResult GenerateFromModel(
+        string outputPath, string startDate, string? name, IReadOnlyList<BimElement> elements,
+        Dictionary<string, double>? productivity, double defaultDays, string[]? sequence, string codeField)
+    {
+        if (QueryTools.ParseDate(startDate) is null)
+        {
+            throw new McpToolException("A start date is required, as yyyy-MM-dd.");
+        }
+
+        var opened = SessionTools.ProjectOpen(
+            outputPath, mode: "readwrite", create: true,
+            name: name ?? Path.GetFileNameWithoutExtension(outputPath), startDate: startDate);
+        var session = SessionStore.Get(opened.Handle);
+        var project = session.File;
+
+        var built = ModelScheduleBuilder.Build(project, opened.Path, elements, productivity,
+            defaultDays <= 0 ? 1 : defaultDays, sequence, codeField);
+        var report = Scheduler.Run(project);
+        session.Dirty = true;
+
+        var notes = new List<string>(built.Notes)
+        {
+            $"{built.TasksCreated} task(s) across {built.Levels} level(s) and {built.Trades} trade(s); "
+            + $"{built.ElementsLinked} element(s) tied to their task"
+            + (built.LinkFile is null ? "." : $" in '{built.LinkFile}' — bim_sync direction='schedule_to_model' writes the 4D file from it."),
+            $"Trade order used: {string.Join(" → ", built.TradeOrder.Take(12))}.",
+            "Nothing is on disk yet — call project_save when the draft is worth keeping.",
+        };
+        notes.AddRange(report.Warnings);
+
+        return new GenerateResult
+        {
+            Handle = opened.Handle,
+            Path = opened.Path,
+            TasksCreated = built.TasksCreated,
+            LinksCreated = built.LinksCreated,
+            DurationBasis = built.DurationsAssumed == 0 ? "productivity"
+                : built.DurationsFromRates == 0 ? "assumed" : "productivity+assumed",
+            Start = report.ProjectStart,
+            Finish = report.ProjectFinish,
+            Unmatched = Array.Empty<string>(),
             Notes = notes,
         };
     }
