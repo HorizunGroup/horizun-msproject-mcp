@@ -238,6 +238,41 @@ def main() -> None:
         same, total, bad = agree(a, b, ("PercentComplete", "ActualDuration", "RemainingDuration"))
         check(f"{label}: progress matches Project, summaries included", same == total, f"differ: {bad}")
 
+    # 2b. MSPDI -> native .mpp keeps progress, baseline and status date. Found in 1.2.1: a 215-task
+    # schedule with 41 finished and 2 in progress came back with 1 finished and none in progress.
+    print("\nMSPDI to native .mpp keeps progress, baseline and status date")
+    mcp = Mcp()
+    try:
+        h = mcp.call("project_open", path=str(work / "progress.xml"), create=True,
+                     name="Progress", startDate="2026-11-02")["handle"]
+        mcp.call("tasks_write", handle=h, ops=[
+            {"op": "create", "name": f"Actividad {n:02}", "duration": f"{2 + n % 4}d"} for n in range(30)])
+        ids = sorted(t["uid"] for t in mcp.call("tasks_query", handle=h, limit=100)["items"] if not t["summary"])
+        mcp.call("links_write", handle=h, ops=[{"op": "link", "from": a, "to": b} for a, b in zip(ids, ids[1:])])
+        mcp.call("schedule_update", handle=h, op="save_baseline")
+        mcp.call("tasks_write", handle=h, ops=[{"op": "update", "uid": u, "percentComplete": 100} for u in ids[:10]]
+                 + [{"op": "update", "uid": ids[10], "percentComplete": 60},
+                    {"op": "update", "uid": ids[11], "percentComplete": 25}])
+        mcp.call("schedule_update", handle=h, op="set_status_date", statusDate="2027-02-28")
+        mcp.call("project_export", handle=h, path=str(work / "progress.xml"), format="mspdi")
+        source = mcp.call("project_open", path=str(work / "progress.xml"))["handle"]
+        result = mcp.call("project_export", handle=source, path=str(work / "progress.mpp"), format="mpp")
+        back = mcp.call("project_open", path=str(work / "progress.mpp"))["handle"]
+        want = {t["uid"]: t for t in mcp.call("tasks_query", handle=source, limit=100)["items"] if not t["summary"]}
+        got = {t["uid"]: t for t in mcp.call("tasks_query", handle=back, limit=100)["items"] if not t["summary"]}
+        info = mcp.call("project_info", handle=back)
+    finally:
+        mcp.close()
+    check("the .mpp export says it was verified", any("Verified" in n for n in result.get("notes", [])),
+          json.dumps(result.get("notes")))
+    lost = [u for u in want if abs((want[u].get("percentComplete") or 0) - (got.get(u, {}).get("percentComplete") or 0)) > 1
+            or (want[u].get("actualStart") or "")[:16] != (got.get(u, {}).get("actualStart") or "")[:16]
+            or (want[u].get("actualFinish") or "")[:16] != (got.get(u, {}).get("actualFinish") or "")[:16]]
+    check("every task keeps its progress and actual dates", not lost, f"lost on {lost[:8]}")
+    check("the baseline survives",
+          all((want[u].get("baselineFinish") or "")[:16] == (got.get(u, {}).get("baselineFinish") or "")[:16] for u in want))
+    check("the status date survives", (info.get("statusDate") or "")[:10] == "2027-02-28", str(info.get("statusDate")))
+
     # 3. A guest in the user's Project.
     print("\nsharing a Project the user has open")
     import win32com.client

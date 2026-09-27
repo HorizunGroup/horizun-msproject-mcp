@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Exporting to .mpp lost progress.** A 215-task MSPDI with 41 finished and 2 in progress came back
+  from `project_export(format="mpp")` with 1 finished and none in progress, while the export
+  reported success. The loss happened when writing, not reading: Project derives progress from
+  assignment work when it imports MSPDI, and the hand-off leaves out started tasks' placeholder
+  assignments (they are what put their dates on the wrong calendar). Progress and the status date
+  are now set back through Project's own fields before saving.
+- **A .mpp is only written if it reads back intact.** It is saved beside the target, reopened, and
+  compared task by task — percent complete, actual start and finish, actual duration and work,
+  baseline, status date. Only a matching file replaces the target; otherwise the export fails with
+  what was lost and the target is left untouched.
+- **Every other export says what it kept.** MSPDI reports "Verified"; MPX (baseline without times),
+  XER (no baseline) and PMXML (no in-progress percent) report a WARNING naming the loss instead of
+  plain success.
+- `project_save` with `format="mpp"` wrote a binary .mpp named `.xml` beside the original while its
+  description said the server could not write .mpp at all. It now saves the .mpp, over the original
+  only once verified, and its description states what each path really does.
+
+### Added
+
+- `tools/export-fidelity-test.py`: round trip of a baselined schedule with a status date and finished,
+  in-progress and unstarted tasks, safe on any machine; the native .mpp round trip is in
+  `project-engine-test.py`.
+
 ## [1.2.1] — 2026-09-22
 
 ### Fixed

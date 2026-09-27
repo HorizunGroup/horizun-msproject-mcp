@@ -283,6 +283,66 @@ public sealed class ProjectHost
         Require(path);
     }
 
+    /// <summary>
+    /// Puts progress and the status date back on our document, through Project's own fields.
+    /// </summary>
+    /// <remarks>
+    /// Importing MSPDI, Project derives a task's progress from the actual work of its assignments,
+    /// not from the task's percent complete or actual dates — and the hand-off leaves out the
+    /// placeholder assignment of started tasks, because that assignment is what puts their dates on
+    /// the wrong calendar. Without this step a schedule with 41 finished tasks came back with 1.
+    /// Setting actual start, then actual finish or actual duration or percent complete, is the edit
+    /// a planner makes by hand, and Project applies its own rules to it.
+    /// </remarks>
+    public void ApplyProgress(string token, DateTime? statusDate, IReadOnlyList<ProgressRecord> records)
+    {
+        Activate(token);
+        var project = _opened[token];
+
+        if (statusDate is not null)
+        {
+            Set(project, "StatusDate", statusDate.Value);
+        }
+
+        var tasks = Get(project, "Tasks");
+        foreach (var record in records)
+        {
+            object? task;
+            try
+            {
+                task = tasks.GetType().InvokeMember(
+                    "UniqueID", BindingFlags.GetProperty, null, tasks, new object[] { record.Uid });
+            }
+            catch
+            {
+                continue; // not a task to Project (a blank row); the read-back check reports it if it matters
+            }
+
+            if (task is null)
+            {
+                continue;
+            }
+
+            if (record.ActualStart is not null)
+            {
+                Set(task, "ActualStart", record.ActualStart.Value);
+            }
+
+            if (record.ActualFinish is not null)
+            {
+                Set(task, "ActualFinish", record.ActualFinish.Value);
+            }
+            else if (record.ActualDurationMinutes is > 0)
+            {
+                Set(task, "ActualDuration", record.ActualDurationMinutes.Value);
+            }
+            else
+            {
+                Set(task, "PercentComplete", (int)Math.Round(record.Percent));
+            }
+        }
+    }
+
     public void Close(string token)
     {
         Activate(token);
@@ -441,6 +501,19 @@ public sealed class ProjectHost
         target.GetType().InvokeMember(property, BindingFlags.GetProperty, null, target, null)
         ?? throw new McpToolException($"Microsoft Project returned nothing for {property}.");
 
+    private static void Set(object target, string property, object value)
+    {
+        try
+        {
+            target.GetType().InvokeMember(property, BindingFlags.SetProperty, null, target, new[] { value });
+        }
+        catch (Exception ex)
+        {
+            var root = ProjectAutomation.Describe(ex);
+            throw new McpToolException($"Microsoft Project refused {property}: {root.Message}");
+        }
+    }
+
     private static object? TryGet(object target, string property)
     {
         try
@@ -479,3 +552,7 @@ public sealed class ProjectHost
         }
     }
 }
+
+/// <summary>Progress to restore on one task: what a planner would type into Project.</summary>
+public sealed record ProgressRecord(
+    int Uid, DateTime? ActualStart, DateTime? ActualFinish, double Percent, double? ActualDurationMinutes);

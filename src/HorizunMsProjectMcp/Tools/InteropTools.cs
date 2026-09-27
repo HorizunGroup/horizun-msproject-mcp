@@ -45,7 +45,8 @@ public static class InteropTools
     [Description(
         "Export the schedule for another tool. 'mspdi' and 'mpx' write real schedule files; 'csv' and "
         + "'json' write a flat task table; 'pbip_dataset' writes the shaped dataset our Power BI report "
-        + "consumes — tasks, assignments, earned value and the S-curve — rather than a raw dump.")]
+        + "consumes — tasks, assignments, earned value and the S-curve — rather than a raw dump. "
+        + "Every schedule file written is read back and compared task by task — progress, actual dates, baseline, status date: 'notes' says 'Verified' when all of it survived and WARNING with what was lost when not (mpx keeps baseline dates without times, xer drops the baseline, pmxml drops in-progress percent; mspdi keeps everything). format='mpp' is written by Microsoft Project where it is installed and is all-or-nothing: it replaces the target only after reading back intact, and fails otherwise.")]
     public static ExportResult ProjectExport(
         [Description("Document handle from project_open.")] string handle,
         [Description("Output file path.")] string path,
@@ -79,8 +80,10 @@ public static class InteropTools
             case "pmxml":
             case "planner":
             case "sdef":
-                MpxjBackend.Write(project, full, format);
-                return new ExportResult { Format = format, Path = full, Rows = project.Tasks.Count };
+            {
+                var (written, notes) = MpxjBackend.WriteVerified(project, full, format);
+                return new ExportResult { Format = format, Path = written, Rows = project.Tasks.Count, Notes = notes };
+            }
 
             case "csv":
             {

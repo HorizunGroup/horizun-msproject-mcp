@@ -137,8 +137,7 @@ public static class SessionTools
     [Description(
         "Save or close an open schedule. Never saves on its own — closing with unsaved changes requires "
         + "either saving first or passing discardChanges=true, so work is never silently lost. "
-        + "Note that no library can author native .mpp; use format='mspdi' for a .xml Microsoft Project "
-        + "opens natively.")]
+        + "Every schedule file written is read back and compared task by task — progress, actual dates, baseline, status date: 'notes' says 'Verified' when all of it survived and WARNING with what was lost when not (mpx keeps baseline dates without times, xer drops the baseline, pmxml drops in-progress percent; mspdi keeps everything). format='mpp' is written by Microsoft Project where it is installed and is all-or-nothing: it replaces the target only after reading back intact, and fails otherwise.")]
     public static SaveResult ProjectSave(
         [Description("Document handle from project_open.")] string handle,
         [Description("'save' (write back over the original path), 'save_as' (write to path), or 'close'.")]
@@ -192,7 +191,7 @@ public static class SessionTools
                     ? Guard.Path(path, "path")
                     : Guard.Path(DefaultTargetFor(session.Path, format), "path");
 
-                var written = MpxjBackend.Write(session.File, target, format);
+                var (written, fidelity) = MpxjBackend.WriteVerified(session.File, target, format);
 
                 session.Dirty = false;
                 session.Fingerprint = ProjectSession.ComputeFingerprint(session.Path, session.File);
@@ -202,13 +201,13 @@ public static class SessionTools
                     SessionStore.Remove(handle);
                 }
 
-                var notes = new List<string>();
+                var notes = new List<string>(fidelity);
                 if (operation == "save" && !written.Equals(session.Path, StringComparison.OrdinalIgnoreCase))
                 {
                     notes.Add(
-                        $"The original file is '{session.Path}', which this backend cannot author. " +
-                        $"Wrote '{written}' instead — open it in Microsoft Project and save as .mpp if you " +
-                        "need the native format back.");
+                        $"The original file is '{session.Path}'; format '{format}' was asked for, so '{written}' " +
+                        "was written beside it instead of over it. Pass format='mpp' to save the .mpp itself — " +
+                        "Microsoft Project writes it, and it replaces the original only after reading back intact.");
                 }
 
                 return new SaveResult
@@ -228,16 +227,20 @@ public static class SessionTools
     }
 
     /// <summary>
-    /// A "save" over a format we cannot author would either fail or silently write something else.
-    /// Redirect to a sibling file in a format we can write, and say so.
+    /// Where a plain "save" lands: over the original when the requested format is the original's,
+    /// otherwise a sibling with the format's own extension — never a file whose extension lies about
+    /// its content (a native .mpp once went out named .xml).
     /// </summary>
     private static string DefaultTargetFor(string originalPath, string format)
     {
         var extension = Path.GetExtension(originalPath).ToLowerInvariant();
         var writable = format.Trim().ToLowerInvariant() switch
         {
+            "mpp" => ".mpp",
             "mpx" => ".mpx",
             "json" => ".json",
+            "xer" => ".xer",
+            "pmxml" => ".pmxml",
             _ => ".xml",
         };
 

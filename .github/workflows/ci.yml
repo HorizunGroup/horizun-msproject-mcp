@@ -60,6 +60,9 @@ jobs:
       - name: Packaging metadata agrees with itself
         run: python tools/packaging-test.py
 
+      - name: Exports keep what they claim to keep
+        run: python tools/export-fidelity-test.py
+
       # Hosted runners have no Microsoft Project, so this reports itself skipped here. It is run
       # locally, on a machine with Project, before every release (see CONTRIBUTING.md).
       - name: Microsoft Project as the scheduling engine
@@ -124,3 +127,6 @@ jobs:
 
       - name: Packaging metadata agrees with itself
         run: python tools/packaging-test.py
+
+      - name: Exports keep what they claim to keep
+        run: python tools/export-fidelity-test.py

@@ -40,17 +40,56 @@ public static class MpxjBackend
     }
 
     /// <summary>
-    /// Writes the schedule. MPXJ cannot author the native binary .mpp format, so a request to
-    /// write one is refused outright rather than quietly producing a different format under
-    /// the requested name.
+    /// Writes the schedule and reads it back, so the result says what the file really holds.
     /// </summary>
+    /// <remarks>
+    /// A native .mpp is written by Microsoft Project (see <see cref="ComBridge.SaveAsMpp"/>) and is
+    /// all-or-nothing: it replaces the target only when it reads back intact, and fails otherwise.
+    /// Every other format is written by MPXJ; formats that cannot hold everything (MPX has no
+    /// baseline, XER renumbers some fields) are written anyway, and what they dropped is listed.
+    /// </remarks>
+    public static (string Path, IReadOnlyList<string> Notes) WriteVerified(ProjectFile project, string path, string format)
+    {
+        var normalized = format.Trim().ToLowerInvariant();
+        if (normalized == "mpp")
+        {
+            var full = Path.GetFullPath(path);
+            var note = WriteNativeMpp(project, full);
+            return (full, new[] { note });
+        }
+
+        var written = Write(project, path, format);
+        if (normalized is "json" or "sdef")
+        {
+            return (written, new[] { $"Not read back: {normalized} is written for other tools, not re-read by this server." });
+        }
+
+        try
+        {
+            var losses = ExportFidelity.Compare(project, Read(written));
+            return losses.Count == 0
+                ? (written, new[] { $"Verified by reading the file back: {ExportFidelity.Census(project)} — all preserved." })
+                : (written, new[]
+                {
+                    $"WARNING — written, but this format did not keep everything. Read back, it differs: "
+                    + ExportFidelity.Describe(losses) + " Use mspdi or mpp to keep all of it.",
+                });
+        }
+        catch (Exception ex)
+        {
+            return (written, new[] { $"WARNING — written, but it could not be read back to verify it: {ex.Message}" });
+        }
+    }
+
+    /// <summary>Writes without checking; <see cref="WriteVerified"/> is what the tools call.</summary>
     public static string Write(ProjectFile project, string path, string format)
     {
         var normalized = format.Trim().ToLowerInvariant();
 
         if (normalized == "mpp")
         {
-            return WriteNativeMpp(project, Path.GetFullPath(path));
+            WriteNativeMpp(project, Path.GetFullPath(path));
+            return Path.GetFullPath(path);
         }
 
         IProjectWriter writer = normalized switch
@@ -105,8 +144,7 @@ public static class MpxjBackend
                 "project_health with deep=true for the diagnosis and repair steps.");
         }
 
-        ComBridge.SaveAsMpp(project, path);
-        return path;
+        return ComBridge.SaveAsMpp(project, path);
     }
 
     /// <summary>

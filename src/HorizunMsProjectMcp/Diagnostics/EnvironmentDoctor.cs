@@ -118,7 +118,9 @@ public static class EnvironmentDoctor
         var com = backend == Backend.Com;
 
         // Writing native .mpp only needs Microsoft Project to be registered — the save is delegated
-        // to it on demand rather than requiring the whole session to run on the COM backend.
+        // to it on demand rather than requiring the whole session to run on the COM backend. True
+        // means "possible", not "trusted": every .mpp is read back and must match before it replaces
+        // the target (ComBridge.SaveAsMpp), so a lossy write fails instead of reporting success.
         var canWriteMpp = project.Available;
 
         return new Dictionary<string, bool>
