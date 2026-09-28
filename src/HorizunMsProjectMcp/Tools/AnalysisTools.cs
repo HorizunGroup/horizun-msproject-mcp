@@ -34,7 +34,12 @@ public static class AnalysisTools
         [Description("lookahead: record the first week's ready tasks as the team's commitment, so the next report measures PPC against it.")]
         bool commit = false,
         [Description("status_report: keep this cut-off in the project's history (.hzpmo.json beside the file) for the trend.")]
-        bool record = false)
+        bool record = false,
+        [Description("lookahead: text field holding who answers for each task, e.g. 'Text2'. Without it, the crews assigned.")]
+        string? ownerField = null,
+        [Description("lookahead: text field listing constraints logic cannot see, e.g. 'Text3' holding "
+                     + "'material: acero; permiso: municipal'. Items starting 'ok' or saying 'listo'/'liberado' count as released.")]
+        string? constraintsField = null)
     {
         return SessionStore.Use(handle, session =>
         {
@@ -52,7 +57,7 @@ public static class AnalysisTools
                 StatusReport = want.Contains("status_report")
                     ? PmoControl.Status(session.File, effective, session.Path, record) : null,
                 Lookahead = want.Contains("lookahead")
-                    ? PmoControl.Lookahead(session.File, effective, Math.Clamp(weeks, 1, 8), session.Path, commit) : null,
+                    ? PmoControl.Lookahead(session.File, effective, Math.Clamp(weeks, 1, 8), session.Path, commit, ownerField, constraintsField) : null,
                 ChangeLog = want.Contains("change_log") && session.Path is not null
                     ? PmoLedger.Load(session.Path).Changes : null,
             };
@@ -111,7 +116,10 @@ public static class AnalysisTools
         [Description(
             "Custom field carrying the budget code, e.g. 'Text1'. Supply it to also check that every "
             + "task is tied to the cost model — the same code the BIM tools match on.")]
-        string? budgetCodeField = null)
+        string? budgetCodeField = null,
+        [Description("Uids of tasks whose incoming lags or leads are justified (curing, a requested fast-track): "
+                     + "left out of the lag and lead checks, and listed in the notes.")]
+        int[]? justifiedLags = null)
     {
         return SessionStore.Use(handle, session =>
         {
@@ -122,7 +130,7 @@ public static class AnalysisTools
             var canRecalculate = EnvironmentDoctor.Run(deep: false).Capabilities
                 .TryGetValue("recalculate", out var recalc) && recalc;
 
-            return Dcma14.Run(session.File, effective, canRecalculate, budgetCodeField);
+            return Dcma14.Run(session.File, effective, canRecalculate, budgetCodeField, justifiedLags);
     });
     }
 

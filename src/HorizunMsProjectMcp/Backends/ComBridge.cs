@@ -51,7 +51,8 @@ public static class ComBridge
                 return 0;
             });
         }
-        catch (McpToolException ex)
+        catch (Exception ex) when (ex is McpToolException or NullReferenceException or InvalidOperationException
+                                       or System.Xml.XmlException or IOException)
         {
             TryDelete(candidate);
             throw new McpToolException(

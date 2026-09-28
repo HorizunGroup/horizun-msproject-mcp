@@ -62,9 +62,13 @@ public static class MpxjMapper
         var unit = TimeUnit.Days;
         var numeric = trimmed;
 
+        // Longest suffix first, so "3ed" is elapsed days and not a malformed "3e" days. Elapsed units
+        // run through nights and weekends (a cure time); '%' is a lag as a share of the predecessor.
         foreach (var (suffix, u) in new[]
                  {
-                     ("mo", TimeUnit.Months), ("w", TimeUnit.Weeks), ("d", TimeUnit.Days),
+                     ("emo", TimeUnit.ElapsedMonths), ("ew", TimeUnit.ElapsedWeeks), ("ed", TimeUnit.ElapsedDays),
+                     ("dt", TimeUnit.ElapsedDays), ("eh", TimeUnit.ElapsedHours), ("em", TimeUnit.ElapsedMinutes),
+                     ("mo", TimeUnit.Months), ("%", TimeUnit.Percent), ("w", TimeUnit.Weeks), ("d", TimeUnit.Days),
                      ("h", TimeUnit.Hours), ("m", TimeUnit.Minutes),
                  })
         {
@@ -195,8 +199,11 @@ public static class MpxjMapper
             Id = resource.ID,
             Name = resource.Name,
             Type = resource.Type?.ToString(),
-            MaxUnits = resource.MaxUnits,
+            MaxUnits = Analysis.ResourceAnalyzer.MaxUnits(resource),
             StandardRate = resource.StandardRate?.Amount,
+            OvertimeRate = resource.OvertimeRate?.Amount,
+            MaterialLabel = resource.MaterialLabel,
+            Calendar = resource.Calendar?.Parent?.Name ?? resource.Calendar?.Name,
             CostTotal = resource.Cost,
             WorkHours = Hours(resource.Work),
             Overallocated = overallocated,

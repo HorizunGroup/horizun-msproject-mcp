@@ -43,6 +43,10 @@ public sealed record StatusReport
     public IReadOnlyDictionary<string, double> Eac { get; init; } = new Dictionary<string, double>();
 
     public double? Tcpi { get; init; }
+
+    /// <summary>The project's currency symbol (S/, $, €), for reading the money figures.</summary>
+    public string? Currency { get; init; }
+
     public IReadOnlyList<string> MilestonesAtRisk { get; init; } = Array.Empty<string>();
     public IReadOnlyList<ReplanItem> TopIssues { get; init; } = Array.Empty<ReplanItem>();
     public IReadOnlyList<StatusSnapshot> Trend { get; init; } = Array.Empty<StatusSnapshot>();
@@ -85,6 +89,9 @@ public sealed record LookaheadTask
     public string? Finish { get; init; }
     public double PercentComplete { get; init; }
     public bool Critical { get; init; }
+
+    /// <summary>Who answers for it: the owner field when one is given, else the crews assigned.</summary>
+    public string? Owner { get; init; }
 
     /// <summary>True when nothing is known to stand in its way.</summary>
     public required bool Ready { get; init; }
@@ -176,6 +183,14 @@ public static class PmoControl
             {
                 eac["atCpiTimesSpi"] = Math.Round(ac.Value + (bac - ev) / (cpi.Value * spi.Value), 2);
             }
+
+            // Bottom-up: what is spent plus what the schedule, as it now stands, still costs — the
+            // remaining work at its current rates and dates, not an index projected over it.
+            if (measure == "cost")
+            {
+                var remaining = leaves.Sum(t => Math.Max(0, Convert.ToDouble(t.Cost ?? 0) - Convert.ToDouble(t.ActualCost ?? 0)));
+                eac["bottomUp"] = Math.Round(ac.Value + remaining, 2);
+            }
         }
         else if (measure == "cost")
         {
@@ -254,6 +269,7 @@ public static class PmoControl
             ForecastFinishBySpiT = forecastBySpiT?.ToString("yyyy-MM-dd"),
             Eac = eac,
             Tcpi = tcpi,
+            Currency = measure == "cost" ? project.ProjectProperties.CurrencySymbol : null,
             MilestonesAtRisk = milestones,
             TopIssues = ReplanReview.Review(project, statusDate).Take(10).ToList(),
             Trend = trend,
@@ -262,8 +278,24 @@ public static class PmoControl
         };
     }
 
-    public static LookaheadReport Lookahead(ProjectFile project, DateTime statusDate, int weeks, string? schedulePath, bool commit)
+    private static int? TextSlot(string? field, string parameter)
     {
+        if (field is null)
+        {
+            return null;
+        }
+
+        return Writes.TaskCustomField.Parse(field) is { Kind: "text" } text
+            ? text.Slot
+            : throw new McpToolException($"{parameter} '{field}' is not a text field. Use Text1 to Text30.");
+    }
+
+    public static LookaheadReport Lookahead(
+        ProjectFile project, DateTime statusDate, int weeks, string? schedulePath, bool commit,
+        string? ownerField = null, string? constraintsField = null)
+    {
+        var ownerSlot = TextSlot(ownerField, "ownerField");
+        var constraintSlot = TextSlot(constraintsField, "constraintsField");
         weeks = Math.Clamp(weeks, 1, 12);
         var notes = new List<string>();
         var monday = statusDate.Date.AddDays(-(((int)statusDate.DayOfWeek + 6) % 7));
@@ -304,6 +336,24 @@ public static class PmoControl
                     constraints.Add("no crew or resource assigned");
                 }
 
+                // The constraints logic cannot see — material, permit, equipment, drawings — kept in a
+                // text field as "material: acero; permiso: municipal". One marked done ("ok: ...",
+                // "listo", "liberado") no longer holds the task.
+                if (constraintSlot is { } cs && Dcma14.SafeGetText(t, cs) is { Length: > 0 } listed)
+                {
+                    foreach (var item in listed.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        var lower = item.ToLowerInvariant();
+                        if (lower.StartsWith("ok", StringComparison.Ordinal) || lower.Contains("listo") || lower.Contains("liberad")
+                            || lower.Contains("released") || lower.StartsWith("✓", StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
+                        constraints.Add(item);
+                    }
+                }
+
                 if (t.Start < statusDate && (t.PercentageComplete ?? 0) == 0)
                 {
                     constraints.Add($"was due to start {t.Start:yyyy-MM-dd} and has not — find out why before committing it again");
@@ -329,6 +379,10 @@ public static class PmoControl
                     Finish = MpxjMapper.Iso(t.Finish),
                     PercentComplete = Convert.ToDouble(t.PercentageComplete ?? 0),
                     Critical = t.Critical,
+                    Owner = ownerSlot is { } os && Dcma14.SafeGetText(t, os) is { Length: > 0 } owner
+                        ? owner
+                        : string.Join(", ", t.ResourceAssignments.Select(a => a.Resource?.Name)
+                            .Where(n => !string.IsNullOrEmpty(n)).Distinct()) is { Length: > 0 } crews ? crews : null,
                     Ready = blocking.Count == 0,
                     Constraints = constraints,
                 });

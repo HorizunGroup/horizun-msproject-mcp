@@ -46,13 +46,14 @@ public static class InteropTools
         "Export the schedule for another tool. 'mspdi' and 'mpx' write real schedule files; 'csv' and "
         + "'json' write a flat task table; 'pbip_dataset' writes the shaped dataset our Power BI report "
         + "consumes — tasks, assignments, earned value and the S-curve — rather than a raw dump. "
-        + "Every schedule file written is read back and compared task by task — progress, actual dates, baseline, status date: 'notes' says 'Verified' when all of it survived and WARNING with what was lost when not (mpx keeps baseline dates without times, xer drops the baseline, pmxml drops in-progress percent; mspdi keeps everything). format='mpp' is written by Microsoft Project where it is installed and is all-or-nothing: it replaces the target only after reading back intact, and fails otherwise.")]
+        + "Every schedule file written is read back and compared task by task — progress, actual dates, baseline, status date, outline and WBS, assignments (resource and units), task and project calendars, fixed and baseline cost, and each resource's max units, rate and calendar: 'notes' says 'Verified' when all of it survived and WARNING with what was lost when not (mpx keeps baseline dates without times, xer drops the baseline, pmxml drops in-progress percent; mspdi keeps everything). format='mpp' is written by Microsoft Project where it is installed and is all-or-nothing: it replaces the target only after reading back intact, and fails otherwise.")]
     public static ExportResult ProjectExport(
         [Description("Document handle from project_open.")] string handle,
         [Description("Output file path.")] string path,
         [Description(
-            "csv, json or pbip_dataset for a flat table; mspdi, mpx, mpp, xer, pmxml, planner "
-            + "or sdef for a real schedule file.")]
+            "csv, json or pbip_dataset for a flat table; wbs_dictionary; scurve_xlsx for the S-curve as an "
+            + "Excel workbook with a native chart; mspdi, mpx, mpp, xer, pmxml, planner or sdef for a real "
+            + "schedule file. An export never writes over a schedule open here.")]
         string format = "csv",
         [Description("Status date used for the earned-value block in pbip_dataset, yyyy-MM-dd.")]
         string? statusDate = null)
@@ -65,6 +66,18 @@ public static class InteropTools
     {
         var project = session.File;
         var full = Guard.Path(path, "path");
+
+        // An export is a copy. Written over a schedule that is open here, it would replace that file
+        // behind its handle's back — and from a read-only handle, write the very file it promised not
+        // to touch. Saving the original is project_save's job, with its checks.
+        var open = SessionStore.All().FirstOrDefault(s =>
+            string.Equals(Path.GetFullPath(s.Path), full, StringComparison.OrdinalIgnoreCase));
+        if (open is not null)
+        {
+            throw new McpToolException(
+                $"'{full}' is a schedule open here{(open.ReadOnly ? " read-only" : "")}; an export never "
+                + "writes over it. Export to another path, or use project_save on a read-write handle.");
+        }
         var directory = Path.GetDirectoryName(full);
         if (!string.IsNullOrEmpty(directory))
         {
@@ -130,6 +143,25 @@ public static class InteropTools
                 return new ExportResult { Format = "wbs_dictionary", Path = full, Rows = rows.Count };
             }
 
+            case "scurve_xlsx":
+            {
+                // The S-curve as a workbook with a native chart: weekly over the whole schedule.
+                var tasks = ScheduleAnalyzer.Leaves(project).ToList();
+                var starts = tasks.Select(t => t.BaselineStart ?? t.Start).Where(d => d is not null).Select(d => d!.Value).ToList();
+                var finishes = tasks.Select(t => t.Finish).Concat(tasks.Select(t => t.BaselineFinish))
+                    .Where(d => d is not null).Select(d => d!.Value).ToList();
+                if (starts.Count == 0 || finishes.Count == 0)
+                {
+                    throw new McpToolException("The schedule has no dated tasks to draw an S-curve from.");
+                }
+
+                var curve = QueryTools.SCurve(project, tasks, starts.Min(), finishes.Max(), "week", selection: false);
+                var rows = SCurveWorkbook.Write(curve, full,
+                    $"{project.ProjectProperties.Name ?? Path.GetFileNameWithoutExtension(session.Path)} — S-curve"
+                    + (curve.ValueMeasure == "cost" && project.ProjectProperties.CurrencySymbol is { } money ? $" ({money})" : ""));
+                return new ExportResult { Format = "scurve_xlsx", Path = full, Rows = rows, Notes = curve.Notes };
+            }
+
             case "json":
             {
                 var tasks = ScheduleAnalyzer.Leaves(project).Select(t => MpxjMapper.ToDto(t, true)).ToList();
@@ -181,7 +213,7 @@ public static class InteropTools
 
             default:
                 throw new McpToolException(
-                    $"Unknown format '{format}'. Use csv, wbs_dictionary, json, pbip_dataset, or any format project_save "
+                    $"Unknown format '{format}'. Use csv, wbs_dictionary, scurve_xlsx, json, pbip_dataset, or any format project_save "
                     + "writes: mspdi, mpx, mpp, xer, pmxml, planner, sdef.");
         }
     }

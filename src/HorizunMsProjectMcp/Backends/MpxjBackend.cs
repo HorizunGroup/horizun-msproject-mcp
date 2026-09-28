@@ -53,6 +53,7 @@ public static class MpxjBackend
         var normalized = format.Trim().ToLowerInvariant();
         if (normalized == "mpp")
         {
+            Writes.Structure.Normalize(project);
             var full = Path.GetFullPath(path);
             var note = WriteNativeMpp(project, full);
             return (full, new[] { note });
@@ -85,6 +86,10 @@ public static class MpxjBackend
     public static string Write(ProjectFile project, string path, string format)
     {
         var normalized = format.Trim().ToLowerInvariant();
+
+        // Anything added without an id or a place in the outline — by an older build, or a write
+        // that failed half-way — would otherwise break the writer or land in the wrong place.
+        Writes.Structure.Normalize(project);
 
         if (normalized == "mpp")
         {
@@ -156,6 +161,8 @@ public static class MpxjBackend
         var temp = Path.Combine(Path.GetTempPath(), $"hzpm-{Guid.NewGuid():N}.xml");
         try
         {
+            // Ids only: a copy must not renumber the live schedule it is taken from.
+            Writes.Structure.EnsureIds(project);
             new MSPDIWriter().Write(project, temp);
             return new MSPDIReader().Read(temp)
                    ?? throw new McpToolException("Could not clone the schedule for simulation.");

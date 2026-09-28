@@ -6,6 +6,102 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-28
+
+A field report from building and running a real construction schedule end to end — baseline,
+progress, costs, earned value, recovery, baseline 1 — on an .mpp Project saved, with a Spanish
+Microsoft Project. Everything that corrupted data, misled, or forced a switch to driving Project by
+hand.
+
+### Fixed — data integrity
+
+- **Tasks added under a summary landed a level too high in the .mpp, and every WBS read "0".**
+  MPXJ gives what is added to a file it read no outline level, outline number or unique id, and keeps
+  rows in the order they were added: a task added under an earlier summary after later rows existed
+  was written after them, and Project hung it under the wrong summary. Rows are now numbered in
+  outline order, the hierarchy rebuilt from row order and level as Project reads it, and outline
+  numbers and WBS follow (a WBS the schedule chose is kept). An `outline` indent now also makes the
+  row above a summary, so summaries stop being analysed as detail tasks.
+- **A resource created on an imported file was rejected, left behind, and broke every save.** Neither
+  it nor its calendar got a unique id; `project_save` and `project_export` then failed with "Object
+  reference not set". Resources, calendars, tasks and assignments now always get ids, and a rejected
+  resource create is rolled back.
+- **`tasks_write` `custom` wrote every key into a text field** (Number1 into Text1, WBS into Text1).
+  It now writes Text1-30, Number1-20, Date1-10, Flag1-20 and WBS to themselves, and rejects any other
+  key by name.
+- **An export could write over the file of an open schedule — a read-only one included.**
+  `project_export` now refuses any path that is a schedule open in this server; saving the original
+  is `project_save`'s job, which already refused read-only handles.
+- **The .mpp export said "Verified" over a broken outline and wrong resources.** Reading the file
+  back now also compares outline level and WBS, who is assigned to each task (by name) and at what
+  units, task and project calendars, fixed and baseline cost, and each resource's max units, rate and
+  calendar. A difference fails the export and leaves the target untouched.
+- **`maxUnits` changed nothing Project would see**, and `standardRate` was accepted and dropped.
+  Max units now go into the availability table as well as the field, rates into the cost rate table.
+
+### Fixed — readings that misled
+
+- **Max units read as 100** for crews Project shows at 600/400/800 %: MPXJ answers from the
+  availability row covering today. They now come from the availability table.
+- **Overallocation summed whole days**, so two tasks one after the other on the same day counted as
+  working together. It now takes the most units at work at the same moment, on the project
+  calendar's working days (Saturdays included on a six-day calendar).
+- **A status date given as a day was read as 00:00**, so work reported at 10:00 that day was "in the
+  future" (DCMA 09). It now means the whole day.
+- **The S-curve skipped periods with nothing planned**, and spread value over Monday-Friday whatever
+  the calendar. Every period is present and the project calendar's working days are used.
+- **New tasks were dated 08:00-17:00 whatever the calendar**, and a milestone spanned the whole day.
+  They take the calendar's own hours, and a milestone is a moment.
+- **Work handed to Project moved to the locale's "Estándar" hours (9-13, 15-19)**: Project lays
+  placeholder work on the unassigned resource's calendar, which derives from the locale template. In
+  the hand-off it now derives from the project calendar.
+- **`schedule_recovery` could return no options and say nothing.** Each lever dropped is now named
+  with the reason; with nothing marked critical, the least-float chain is used.
+- **Assigning a resource or material to a finished task reopened it** (99%, remaining work pushed past
+  the status date — +16 days on the real schedule). The assignment is created finished.
+- `level_resources` was listed but not implemented.
+- COM: a start refused with 0x80080005 after a Project closed by force is retried, then explained;
+  a Project on its start screen or behind a dialog is named as the cause; an .mpp export that failed
+  on a broken model reports the cause instead of "An error occurred invoking".
+
+### Added
+
+- `calendars_write`: `set_week` (working days and hours: half or full Saturdays, shifts, in English
+  or Spanish day names), working exceptions with hours, `create` with `basedOn` (a base calendar copying another's week
+  and exceptions),
+  `set_project_calendar`.
+- `tasks_write`: `calendar` (a base calendar; a resource's own is refused), `ignoreResourceCalendar`, `taskType`, `effortDriven`, `fixedCost`,
+  `fixedCostAccrual`, `baselineCost` into any `baselineSlot` without touching baseline dates,
+  `actualStart: "none"` to return a task to not started, and `key`/`parentKey` to build a whole
+  outline in one batch.
+- `resources_write`: `overtimeRate`, `materialLabel` (materials assigned by quantity), `calendar`.
+- `schedule_update` op `level_resources`, through Microsoft Project's leveller, with `withinSlack`
+  and `levelingCanSplit`.
+- `schedule_scenarios` (new tool): what-if alternatives — calendar, resource, task and logic changes
+  together — each on its own copy, side by side: finish, cost, overallocation, critical tasks.
+- `schedule_recovery` levers: overlap once half the predecessor is done, full Saturdays, and all
+  useful levers combined, measured rather than summed.
+- `links_write` lags in elapsed time (`3ed`, `2ew`) and as a percentage of the predecessor (`50%`).
+- `schedule_qa`: `justifiedLags` leaves justified lags and leads out of checks 2 and 3; new rule
+  `hrz_finished_incomplete` (actual finish but under 100%).
+- `schedule_analyze` `lookahead`: `ownerField` and `constraintsField` for who answers for each task
+  and the constraints logic cannot see (material, permits, equipment).
+- `status_report`: bottom-up EAC (actual plus the remaining cost as scheduled) and the currency.
+- `timephased_query` `s_curve`: a `forecast` curve (to date, then remaining work to the projected
+  finish); `project_export` format `scurve_xlsx`: the S-curve as a workbook with a native chart.
+- `project_info`: the project calendar, its working week and the currency; `resources_query`:
+  overtime rate, material unit and calendar.
+- `tools/imported-file-test.py` (16 checks) and `tools/planner-features-test.py` (32 checks), internal
+  engine only.
+
+### Not verified against Microsoft Project
+
+These change what is handed to Project and were checked on the MSPDI, not by Project itself on this
+release's machine: the outline and resources in a written .mpp, the unassigned-resource calendar,
+levelling, and the COM start retry. `tools/project-engine-test.py` covers the hand-off where Project
+is installed. Reassignments to 'Peón' that came back as 'Electricista' were not reproduced outside
+Project; such an export now fails verification instead of passing.
+
 ## [1.3.0] - 2026-09-27
 
 It now works as a PMO, not only as a Project operator.

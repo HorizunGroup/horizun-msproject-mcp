@@ -38,6 +38,15 @@ public sealed record ProjectInfo
 
     /// <summary>Hours in a working day on that calendar — what a duration in days actually means here.</summary>
     public double? HoursPerDay { get; init; }
+
+    /// <summary>The calendar set as the project's (calendars_write set_project_calendar changes it).</summary>
+    public string? ProjectCalendar { get; init; }
+
+    /// <summary>Working hours of each day of the week on the project calendar; "" is a day off.</summary>
+    public IReadOnlyDictionary<string, string> WorkingWeek { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>The project's currency symbol, for reading every money figure.</summary>
+    public string? Currency { get; init; }
     public required IReadOnlyList<int> BaselinesWithData { get; init; }
     public required IReadOnlyDictionary<string, string> CustomFieldAliases { get; init; }
     public required IReadOnlyDictionary<string, int> TasksByStatus { get; init; }
@@ -144,6 +153,13 @@ public static class QueryTools
                 EffectiveCalendar = effective.Name,
                 WorkingDaysOfWeek = effective.WorkingDaysOfWeek(),
                 HoursPerDay = effective.HoursPerDay,
+                ProjectCalendar = project.DefaultCalendar?.Name,
+                WorkingWeek = project.DefaultCalendar is { } week
+                    ? new[] { DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday,
+                              DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday }
+                        .ToDictionary(d => d.ToString(), d => Writes.CalendarEdits.Describe(week, d))
+                    : new Dictionary<string, string>(),
+                Currency = properties.CurrencySymbol,
                 BaselinesWithData = baselines,
                 CustomFieldAliases = aliases,
                 TasksByStatus = byStatus,
@@ -552,7 +568,7 @@ public static class QueryTools
                 }
 
                 // Spread the total evenly across the working days the task spans.
-                var days = WorkingDays(start.Value.Date, finish.Value.Date).ToList();
+                var days = WorkingDays(project, start.Value.Date, finish.Value.Date).ToList();
                 if (days.Count == 0)
                 {
                     continue;
@@ -616,7 +632,7 @@ public static class QueryTools
     });
     }
 
-    private static TimephasedResult SCurve(
+    internal static TimephasedResult SCurve(
         ProjectFile project, IReadOnlyList<MPXJ.Net.Task> tasks, DateTime rangeStart, DateTime rangeEnd,
         string step, bool selection)
     {
@@ -625,6 +641,7 @@ public static class QueryTools
         var pv = new SortedDictionary<DateTime, double>();
         var ev = new SortedDictionary<DateTime, double>();
         var ac = new SortedDictionary<DateTime, double>();
+        var etc = new SortedDictionary<DateTime, double>();
 
         void Spread(SortedDictionary<DateTime, double> into, DateTime? start, DateTime? finish, double amount)
         {
@@ -633,7 +650,7 @@ public static class QueryTools
                 return;
             }
 
-            var days = WorkingDays(start.Value.Date, finish.Value.Date).ToList();
+            var days = WorkingDays(project, start.Value.Date, finish.Value.Date).ToList();
             if (days.Count == 0)
             {
                 days.Add(finish.Value.Date);
@@ -652,6 +669,18 @@ public static class QueryTools
             Spread(pv, task.BaselineStart ?? task.Start, task.BaselineFinish ?? task.Finish, value);
 
             var percent = Convert.ToDouble(task.PercentageComplete ?? 0) / 100.0;
+
+            // What is left, where the schedule now puts it: from the status date (or the task's start,
+            // if later) to its current finish. In money, remaining cost; otherwise remaining value.
+            if (percent < 1 && task.Finish is not null)
+            {
+                var remaining = valueMeasure == "cost"
+                    ? Math.Max(0, Convert.ToDouble(task.Cost ?? 0) - Convert.ToDouble(task.ActualCost ?? 0))
+                    : value * (1 - percent);
+                var from = task.Start is { } s0 && s0 > statusDate ? s0 : statusDate.AddDays(1);
+                Spread(etc, from, task.Finish.Value < from ? from : task.Finish, remaining);
+            }
+
             if (percent > 0)
             {
                 var earnedTo = task.ActualFinish ?? (statusDate > (task.ActualStart ?? statusDate) ? statusDate : task.ActualStart);
@@ -663,10 +692,21 @@ public static class QueryTools
             }
         }
 
-        IReadOnlyList<TimephasedBucket> Cum(SortedDictionary<DateTime, double> source, bool stopAtStatus)
+        // Every period from the first to the last, including those in which nothing was planned: a
+        // cumulative curve holds its value through them rather than skipping the week.
+        var allKeys = pv.Keys.Concat(ev.Keys).Concat(ac.Keys).Concat(etc.Keys).ToList();
+        var keys = new List<DateTime>();
+        if (allKeys.Count > 0)
         {
-            var keys = pv.Keys.Union(source.Keys).OrderBy(k => k).ToList();
-            var running = 0.0;
+            for (var k = allKeys.Min(); k <= allKeys.Max(); k = NextBucket(k, step))
+            {
+                keys.Add(k);
+            }
+        }
+
+        IReadOnlyList<TimephasedBucket> Cum(SortedDictionary<DateTime, double> source, bool stopAtStatus, double startAt = 0)
+        {
+            var running = startAt;
             var list = new List<TimephasedBucket>();
             foreach (var k in keys)
             {
@@ -693,6 +733,17 @@ public static class QueryTools
             + "task has no baseline); EV is budget x percent complete, earned between the actual start and the "
             + "actual finish or the status date; curves stop at the status date " + statusDate.ToString("yyyy-MM-dd") + ".",
         };
+        // The forecast: actual to date (AC in money, EV otherwise), then the remaining work where the
+        // schedule now has it, up to the projected finish — the curve an EAC is the end of.
+        var toDate = valueMeasure == "cost" ? ac : ev;
+        var forecast = new SortedDictionary<DateTime, double>();
+        foreach (var (k, v) in toDate.Where(kv => kv.Key <= statusDate)) forecast[k] = forecast.GetValueOrDefault(k) + v;
+        foreach (var (k, v) in etc) forecast[k] = forecast.GetValueOrDefault(k) + v;
+        curves["forecast"] = Cum(forecast, false);
+        notes.Add("'forecast' is " + (valueMeasure == "cost" ? "actual cost" : "earned value")
+                  + " to the status date, then the remaining work on its current dates to the projected finish; "
+                  + "its last value is the bottom-up estimate at completion.");
+
         if (valueMeasure == "cost")
         {
             curves["ac"] = Cum(ac, true);
@@ -723,16 +774,37 @@ public static class QueryTools
         };
     }
 
-    private static IEnumerable<DateTime> WorkingDays(DateTime start, DateTime finish)
+    /// <summary>The project calendar's working days: a six-day site works Saturdays, and value spread
+    /// over five days put a sixth of every week in the wrong place.</summary>
+    private static IEnumerable<DateTime> WorkingDays(ProjectFile project, DateTime start, DateTime finish)
     {
+        var calendar = project.DefaultCalendar;
         for (var day = start; day <= finish; day = day.AddDays(1))
         {
-            if (day.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday))
+            bool working;
+            try
+            {
+                working = calendar?.IsWorkingDate(DateOnly.FromDateTime(day))
+                          ?? day.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday);
+            }
+            catch
+            {
+                working = day.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday);
+            }
+
+            if (working)
             {
                 yield return day;
             }
         }
     }
+
+    private static DateTime NextBucket(DateTime key, string granularity) => granularity switch
+    {
+        "day" => key.AddDays(1),
+        "month" => key.AddMonths(1),
+        _ => key.AddDays(7),
+    };
 
     private static DateTime BucketKey(DateTime day, string granularity) => granularity switch
     {

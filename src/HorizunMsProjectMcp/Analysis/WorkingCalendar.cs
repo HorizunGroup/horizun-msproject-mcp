@@ -277,6 +277,43 @@ public sealed class WorkingCalendar
         return count * sign;
     }
 
+    /// <summary>When work starts on that day by this calendar — 08:00 on most, but not all: a
+    /// calendar whose day starts at 07:00 put a new task's start an hour inside the day.</summary>
+    public DateTime StartOn(DateTime day)
+    {
+        try
+        {
+            if (_calendar?.GetStartTime(DateOnly.FromDateTime(day)) is { } time)
+            {
+                return day.Date + time.ToTimeSpan();
+            }
+        }
+        catch
+        {
+            // Fall back to the conventional day.
+        }
+
+        return AtStart(day);
+    }
+
+    /// <summary>When work ends on that day by this calendar: 13:00 on a half Saturday, not 17:00.</summary>
+    public DateTime FinishOn(DateTime day)
+    {
+        try
+        {
+            if (_calendar?.GetFinishTime(DateOnly.FromDateTime(day)) is { } time)
+            {
+                return day.Date + (time == TimeOnly.MinValue ? TimeSpan.FromDays(1) : time.ToTimeSpan());
+            }
+        }
+        catch
+        {
+            // Fall back to the conventional day.
+        }
+
+        return AtFinish(day);
+    }
+
     public static DateTime AtStart(DateTime day) =>
         new(day.Year, day.Month, day.Day, StartHour, 0, 0);
 

@@ -24,6 +24,13 @@ public sealed record TaskOp
     [Description("For create: make the task a child of this uid.")]
     public int? ParentUid { get; init; }
 
+    [Description("For create: a name for this new task within the batch, so later operations in the same "
+                 + "batch can put tasks under it with parentKey — a whole outline in one call.")]
+    public string? Key { get; init; }
+
+    [Description("For create: make the task a child of the task created earlier in this batch with this key.")]
+    public string? ParentKey { get; init; }
+
     public string? Name { get; init; }
 
     [Description("Duration with a unit: 5d, 8h, 2w, 0.")]
@@ -34,6 +41,9 @@ public sealed record TaskOp
 
     public string? Finish { get; init; }
     public double? PercentComplete { get; init; }
+
+    [Description("yyyy-MM-dd HH:mm. 'none' clears it, returning the task to not started (with its actual "
+                 + "finish and progress).")]
     public string? ActualStart { get; init; }
     public string? ActualFinish { get; init; }
     public bool? Milestone { get; init; }
@@ -50,7 +60,33 @@ public sealed record TaskOp
     [Description("For outline: positive indents, negative outdents.")]
     public int? Indent { get; init; }
 
-    [Description("Custom text fields to set, e.g. {\"Text1\": \"CWA-3\"}.")]
+    [Description("Task calendar, by name. '' removes it, so the task follows the project calendar.")]
+    public string? Calendar { get; init; }
+
+    [Description("With a task calendar: schedule on it alone, ignoring the resources' calendars.")]
+    public bool? IgnoreResourceCalendar { get; init; }
+
+    [Description("FixedUnits, FixedDuration, or FixedWork.")]
+    public string? TaskType { get; init; }
+
+    public bool? EffortDriven { get; init; }
+
+    [Description("Fixed cost of the task, besides its resources.")]
+    public double? FixedCost { get; init; }
+
+    [Description("When the fixed cost accrues: Start, End, or Prorated.")]
+    public string? FixedCostAccrual { get; init; }
+
+    [Description("Baseline cost to store without touching the baseline dates — the budget that arrives "
+                 + "after the baseline was approved. Goes into baselineSlot.")]
+    public double? BaselineCost { get; init; }
+
+    [Description("Baseline 0-10 that baselineCost goes into. Defaults to 0.")]
+    public int? BaselineSlot { get; init; }
+
+    [Description("Custom fields to set, e.g. {\"Text1\": \"CWA-3\", \"Number1\": \"12.5\", \"Flag1\": \"true\", "
+                 + "\"Date1\": \"2026-10-05\", \"WBS\": \"1.2.3\"}. Text1-30, Number1-20, Date1-10, Flag1-20 and WBS; "
+                 + "any other key is rejected.")]
     public Dictionary<string, string>? Custom { get; init; }
 }
 
@@ -68,7 +104,8 @@ public sealed record LinkOp
     [Description("FS (default), SS, FF, or SF.")]
     public string? Type { get; init; }
 
-    [Description("Lag with a unit: 2d, -1d, 0.")]
+    [Description("Lag with a unit: 2d, -1d (a lead), 3ed (elapsed days, through weekends — a cure), 50% "
+                 + "(half the predecessor's duration), 0.")]
     public string? Lag { get; init; }
 }
 
@@ -84,23 +121,50 @@ public sealed record ResourceOp
     public string? Type { get; init; }
 
     public double? MaxUnits { get; init; }
+
+    [Description("Cost per hour for a work resource, per unit of material for a material one.")]
     public double? StandardRate { get; init; }
+
+    [Description("Overtime cost per hour.")]
+    public double? OvertimeRate { get; init; }
+
+    [Description("For a material resource: its unit, e.g. 'm3', 'kg', 'bls'. Assign it with units = the "
+                 + "quantity, not a percentage.")]
+    public string? MaterialLabel { get; init; }
+
+    [Description("Base calendar the resource works on, by name (its own calendar derives from it).")]
+    public string? Calendar { get; init; }
 
     [Description("For assign and unassign.")]
     public int? TaskUid { get; init; }
 
-    [Description("For assign: percentage of the resource, e.g. 100.")]
+    [Description("For assign: percentage of a work resource (e.g. 400 for a crew of four), or the "
+                 + "quantity of a material resource in its unit (e.g. 12.5 m3).")]
     public double? Units { get; init; }
 }
 
 public sealed record CalendarOp
 {
     [Description(
-        "create, delete, or set_exception. The weekly working-hours pattern is not editable here — "
-        + "change it in Microsoft Project; exceptions for specific dates are.")]
+        "create, delete, set_week, set_exception, or set_project_calendar. set_week sets the working "
+        + "hours of days of the week (e.g. days='mon-fri', hours='08:00-12:00,13:00-17:00'; days='sat', "
+        + "hours='08:00-13:00'; hours='' makes the days non-working). set_exception sets specific dates, "
+        + "non-working by default, or working with hours. set_project_calendar makes the named calendar "
+        + "the project's.")]
     public required string Op { get; init; }
 
+    [Description("The calendar. Defaults to the project calendar for set_week and set_exception.")]
     public string? Name { get; init; }
+
+    [Description("For create: the calendar to copy the week and exceptions from. The new calendar is always "
+                 + "a base calendar, usable for tasks and the project. Without it, the standard week.")]
+    public string? BasedOn { get; init; }
+
+    [Description("For set_week: mon-sun or lun-dom, ranges and lists, e.g. 'mon-fri', 'sat', 'lun,mie,vie'.")]
+    public string? Days { get; init; }
+
+    [Description("Working hours, e.g. '08:00-12:00,13:00-17:00'. Empty means not worked.")]
+    public string? Hours { get; init; }
 
     [Description("Exception start, yyyy-MM-dd.")]
     public string? From { get; init; }
@@ -108,11 +172,9 @@ public sealed record CalendarOp
     [Description("Exception end, yyyy-MM-dd. Defaults to From.")]
     public string? To { get; init; }
 
-    [Description("Whether the exception days are working days.")]
+    [Description("Whether the exception days are working days. A working exception takes hours "
+                 + "(default 08:00-12:00,13:00-17:00).")]
     public bool? Working { get; init; }
-
-    // No day-of-week or hours fields: the weekly pattern is not editable through this backend,
-    // and carrying arguments for something that always refuses only invites the attempt.
 }
 
 [McpServerToolType]
@@ -146,161 +208,7 @@ public static class WriteTools
                 throw new McpToolException("No operations supplied.");
             }
 
-            return WriteEngine.Run(session, dryRun, (project, rejected) =>
-            {
-                var pending = new List<PendingOp>();
-
-                foreach (var op in ops)
-                {
-                    switch (op.Op.Trim().ToLowerInvariant())
-                    {
-                        case "create":
-                        {
-                            var current = new PendingOp { Label = "create" };
-                            pending.Add(current);
-                            var parent = op.ParentUid is not null ? project.GetTaskByUniqueID(op.ParentUid.Value) : null;
-                            if (op.ParentUid is not null && parent is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(op.ParentUid.Value, "parentUid", op.ParentUid, null,
-                                    "No task with that uid to parent under."));
-                                continue;
-                            }
-
-                            var created = parent is null ? project.AddTask() : parent.AddTask();
-                            EnsureUniqueId(project, created);
-                            created.Name = op.Name ?? "New task";
-                            ApplyFields(project, created, op, rejected, current, isNew: true);
-                            GiveDatesIfMissing(project, created);
-
-                            var newUid = created.UniqueID;
-                            var expectedName = created.Name;
-                            current.Checks.Add(file =>
-                            {
-                                var check = newUid is null ? null : file.GetTaskByUniqueID(newUid.Value);
-                                return check is null
-                                    ? WriteEngine.Reject(newUid ?? -1, "create", op.Name, null,
-                                        "The task was added but could not be read back afterwards.")
-                                    : check.Name != expectedName
-                                        ? WriteEngine.Reject(newUid!.Value, "name", expectedName, check.Name,
-                                            "The name did not survive the write.")
-                                        : null;
-                            });
-                            break;
-                        }
-
-                        case "update":
-                        {
-                            var current = new PendingOp { Label = "update" };
-                            pending.Add(current);
-                            if (op.Uid is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(-1, "uid", null, null, "update needs a uid."));
-                                continue;
-                            }
-
-                            var task = project.GetTaskByUniqueID(op.Uid.Value);
-                            if (task is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(op.Uid.Value, "uid", op.Uid, null,
-                                    "No task with that uid. Row ids shift — use the uid from tasks_query."));
-                                continue;
-                            }
-
-                            ApplyFields(project, task, op, rejected, current, isNew: false);
-                            break;
-                        }
-
-                        case "delete":
-                        {
-                            var current = new PendingOp { Label = "delete" };
-                            pending.Add(current);
-                            if (op.Uid is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(-1, "uid", null, null, "delete needs a uid."));
-                                continue;
-                            }
-
-                            var task = project.GetTaskByUniqueID(op.Uid.Value);
-                            if (task is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(op.Uid.Value, "uid", op.Uid, null,
-                                    "No task with that uid."));
-                                continue;
-                            }
-
-                            var doomed = op.Uid.Value;
-                            var childCount = task.ChildTasks.Count;
-                            project.RemoveTask(task);
-                            current.Checks.Add(file => file.GetTaskByUniqueID(doomed) is null
-                                ? null
-                                : WriteEngine.Reject(doomed, "delete", "removed", "still present",
-                                    "The task is still in the model after the delete."));
-
-                            if (childCount > 0)
-                            {
-                                rejected.Add(new RejectedWrite
-                                {
-                                    Uid = doomed,
-                                    Field = "delete",
-                                    Reason = $"Deleting this summary task also removed its {childCount} child task(s). "
-                                             + "That is counted as one applied operation.",
-                                });
-                            }
-
-                            break;
-                        }
-
-                        case "outline":
-                        {
-                            var current = new PendingOp { Label = "outline" };
-                            pending.Add(current);
-                            if (op.Uid is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(-1, "uid", null, null, $"{op.Op} needs a uid."));
-                                continue;
-                            }
-
-                            var task = project.GetTaskByUniqueID(op.Uid.Value);
-                            if (task is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(op.Uid.Value, "uid", op.Uid, null, "No task with that uid."));
-                                continue;
-                            }
-
-                            // MPXJ has no reparent primitive; outline level is the honest approximation
-                            // it can verify, so state the limit rather than pretend the move happened.
-                            var currentLevel = task.OutlineLevel ?? 1;
-                            var targetLevel = Math.Max(1, currentLevel + (op.Indent ?? 0));
-                            task.OutlineLevel = targetLevel;
-
-                            var uid = op.Uid.Value;
-                            current.Checks.Add(file =>
-                            {
-                                var check = file.GetTaskByUniqueID(uid);
-                                return check?.OutlineLevel == targetLevel
-                                    ? null
-                                    : WriteEngine.Reject(uid, "outlineLevel", targetLevel, check?.OutlineLevel,
-                                        "The outline level did not survive the write.");
-                            });
-
-                            break;
-                        }
-
-                        default:
-                            rejected.Add(WriteEngine.Reject(op.Uid ?? -1, "op", op.Op, null,
-                                op.Op.Trim().Equals("move", StringComparison.OrdinalIgnoreCase)
-                                    ? "There is no 'move' operation: this backend cannot reorder tasks "
-                                      + "within the outline. Use 'outline' with indent to change a task's "
-                                      + "level, or reorder in Microsoft Project."
-                                    : $"Unknown operation '{op.Op}'. Use create, update, delete, or outline."));
-                            break;
-                    }
-                }
-
-                // Any of these ops can change detail-task progress; summaries show it rolled up.
-                ProgressRules.RollUp(project);
-                return pending;
-            });
+            return WriteEngine.Run(session, dryRun, (project, rejected) => ApplyTaskOps(project, ops, rejected));
     });
     }
 
@@ -326,6 +234,105 @@ public static class WriteTools
         if (task.ID is null)
         {
             task.ID = project.Tasks.Select(t => t.ID ?? 0).DefaultIfEmpty(0).Max() + 1;
+        }
+    }
+
+    /// <summary>Max units, rates, material unit and calendar, each verified on its own.</summary>
+    /// <remarks>
+    /// Max units live in the availability table as well as in the field: Microsoft Project and MPXJ
+    /// both read the table, so writing only the field changed nothing either would show. Rates live in
+    /// the cost rate table, which is what the file carries — standardRate used to be accepted and
+    /// dropped.
+    /// </remarks>
+    private static void ApplyResourceFields(
+        ProjectFile project, Resource resource, ResourceOp op, PendingOp pending, List<RejectedWrite> rejected)
+    {
+        var uid = resource.UniqueID ?? -1;
+        void Check(string field, object? expected, Func<Resource, object?> read, string reason) =>
+            pending.Checks.Add(file =>
+            {
+                var check = file.GetResourceByUniqueID(uid);
+                var actual = check is null ? null : read(check);
+                return Equals(actual?.ToString(), expected?.ToString())
+                    ? null
+                    : WriteEngine.Reject(uid, field, expected, actual, reason);
+            });
+
+        if (op.MaxUnits is not null)
+        {
+            if (op.MaxUnits <= 0)
+            {
+                rejected.Add(WriteEngine.Reject(uid, "maxUnits", op.MaxUnits, null, "Max units must be above 0."));
+            }
+            else
+            {
+                resource.Set(ResourceField.MaxUnits, op.MaxUnits.Value);
+                resource.Availability.Clear();
+                // Project's own bounds for "available always" (NA to NA); an open range breaks the MSPDI writer.
+                resource.Availability.Add(new Availability(new DateTime(1984, 1, 1), new DateTime(2049, 12, 31, 23, 59, 0), op.MaxUnits.Value));
+                Check("maxUnits", op.MaxUnits.Value, r => Analysis.ResourceAnalyzer.MaxUnits(r),
+                    "Max units did not survive the write.");
+            }
+        }
+
+        if (op.StandardRate is not null || op.OvertimeRate is not null)
+        {
+            var table = resource.GetCostRateTable(0);
+            var index = table.Count == 0 ? -1 : Math.Max(0, table.GetIndexByDate(DateTime.Now));
+            var entry = index < 0 ? null : table[index];
+            const TimeUnit perUnit = TimeUnit.Hours; // a material rate is per unit; Project stores it the same way
+            var standard = op.StandardRate is { } sr ? new Rate(sr, perUnit) : entry?.StandardRate ?? new Rate(0, perUnit);
+            var overtime = op.OvertimeRate is { } or ? new Rate(or, perUnit) : entry?.OvertimeRate ?? new Rate(0, perUnit);
+            var replacement = new CostRateTableEntry(project,
+                entry?.StartDate ?? DateTime.MinValue, entry?.EndDate ?? DateTime.MaxValue,
+                entry?.CostPerUse, new[] { standard, overtime });
+            if (index < 0) table.Add(replacement);
+            else table[index] = replacement;
+
+            if (op.StandardRate is not null)
+            {
+                Check("standardRate", op.StandardRate.Value, r => r.StandardRate?.Amount, "The rate did not survive the write.");
+            }
+
+            if (op.OvertimeRate is not null)
+            {
+                Check("overtimeRate", op.OvertimeRate.Value, r => r.OvertimeRate?.Amount, "The rate did not survive the write.");
+            }
+        }
+
+        if (op.MaterialLabel is not null)
+        {
+            if (resource.Type is not ResourceType.Material)
+            {
+                rejected.Add(WriteEngine.Reject(uid, "materialLabel", op.MaterialLabel, null,
+                    "Only a material resource has a unit; create it with type='Material'."));
+            }
+            else
+            {
+                resource.Set(ResourceField.MaterialLabel, op.MaterialLabel);
+                Check("materialLabel", op.MaterialLabel, r => r.MaterialLabel, "The unit did not survive the write.");
+            }
+        }
+
+        if (op.Calendar is not null)
+        {
+            if (project.GetCalendarByName(op.Calendar) is not { Parent: null } basis)
+            {
+                rejected.Add(WriteEngine.Reject(uid, "calendar", op.Calendar, null,
+                    $"No base calendar named '{op.Calendar}'. Create it with calendars_write."));
+            }
+            else
+            {
+                var own = resource.Calendar;
+                if (own is null || own.Parent is null)
+                {
+                    own = resource.AddCalendar();
+                }
+
+                own.Parent = basis;
+                Check("calendar", op.Calendar, r => r.Calendar?.Parent?.Name ?? r.Calendar?.Name,
+                    "The resource calendar did not survive the write.");
+            }
         }
     }
 
@@ -355,9 +362,9 @@ public static class WriteTools
         var start = calendar.NextWorkingDay(anchor);
         var days = MpxjMapper.Days(task.Duration, calendar.HoursPerDay) ?? 0;
 
-        task.Start = Analysis.WorkingCalendar.AtStart(start);
-        task.Finish = Analysis.WorkingCalendar.AtFinish(
-            days <= 0 ? start : calendar.AddWorkingDays(start, days));
+        // The calendar's own hours: a milestone on a calendar that starts at 07:00 sits at 07:00.
+        task.Start = calendar.StartOn(start);
+        task.Finish = days <= 0 ? task.Start : calendar.FinishOn(calendar.AddWorkingDays(start, days));
     }
 
     private static void ApplyFields(
@@ -429,7 +436,22 @@ public static class WriteTools
 
         SetDate(task, op.Start, "start", (t, d) => t.Start = d, t => t.Start, uid, pending, rejected);
         SetDate(task, op.Finish, "finish", (t, d) => t.Finish = d, t => t.Finish, uid, pending, rejected);
-        SetDate(task, op.ActualStart, "actualStart", (t, d) => t.ActualStart = d, t => t.ActualStart, uid, pending, rejected);
+        if (op.ActualStart is not null && op.ActualStart.Trim().ToLowerInvariant() is "none" or "na" or "nod" or "")
+        {
+            // Back to not started: no actual dates, no progress. Microsoft Project's own token for
+            // this is locale-bound ("NA", "NOD" in Spanish); here it is simply 'none'.
+            task.ActualFinish = null;
+            task.ActualStart = null;
+            task.PercentageComplete = 0;
+            Writes.ProgressRules.PercentChanged(project, task);
+            Verify(pending, uid, "actualStart", "none",
+                t => t.ActualStart is null && (t.PercentageComplete ?? 0) == 0 ? "none" : MpxjMapper.Iso(t.ActualStart),
+                "The task still has an actual start.");
+        }
+        else
+        {
+            SetDate(task, op.ActualStart, "actualStart", (t, d) => t.ActualStart = d, t => t.ActualStart, uid, pending, rejected);
+        }
         SetDate(task, op.ActualFinish, "actualFinish", (t, d) => t.ActualFinish = d, t => t.ActualFinish, uid, pending, rejected);
         SetDate(task, op.Deadline, "deadline", (t, d) => t.Deadline = d, t => t.Deadline, uid, pending, rejected);
         SetDate(task, op.ConstraintDate, "constraintDate", (t, d) => t.ConstraintDate = d, t => t.ConstraintDate, uid, pending, rejected);
@@ -449,22 +471,127 @@ public static class WriteTools
             }
         }
 
+        if (op.Calendar is not null)
+        {
+            if (op.Calendar.Length == 0)
+            {
+                task.Calendar = null;
+                Verify(pending, uid, "calendar", "", t => t.Calendar?.Name ?? "", "The task calendar did not clear.");
+            }
+            else if (project.GetCalendarByName(op.Calendar) is { } resourceOwn
+                     && (resourceOwn.Parent is not null || project.Resources.Any(r => r.Calendar == resourceOwn)))
+            {
+                rejected.Add(WriteEngine.Reject(uid, "calendar", op.Calendar, task.Calendar?.Name,
+                    $"'{op.Calendar}' is a resource's calendar; a task calendar has to be a base calendar, or "
+                    + "Microsoft Project drops it. Create one with calendars_write op='create' (basedOn copies it)."));
+            }
+            else if (project.GetCalendarByName(op.Calendar) is { } calendar)
+            {
+                task.Calendar = calendar;
+                Verify(pending, uid, "calendar", op.Calendar, t => t.Calendar?.Name,
+                    "The task calendar did not survive the write.");
+            }
+            else
+            {
+                rejected.Add(WriteEngine.Reject(uid, "calendar", op.Calendar, task.Calendar?.Name,
+                    $"No calendar named '{op.Calendar}'. Create it with calendars_write, or call project_info."));
+            }
+        }
+
+        if (op.IgnoreResourceCalendar is not null)
+        {
+            task.IgnoreResourceCalendar = op.IgnoreResourceCalendar.Value;
+            Verify(pending, uid, "ignoreResourceCalendar", op.IgnoreResourceCalendar, t => t.IgnoreResourceCalendar,
+                "The flag did not survive the write.");
+        }
+
+        if (op.TaskType is not null)
+        {
+            if (Enum.TryParse<TaskType>(op.TaskType, ignoreCase: true, out var type) && type != MPXJ.Net.TaskType.FixedDurationAndUnits)
+            {
+                task.Type = type;
+                Verify(pending, uid, "taskType", type, t => t.Type, "The task type did not survive the write.");
+            }
+            else
+            {
+                rejected.Add(WriteEngine.Reject(uid, "taskType", op.TaskType, task.Type,
+                    "Task type is FixedUnits, FixedDuration, or FixedWork."));
+            }
+        }
+
+        if (op.EffortDriven is not null)
+        {
+            task.EffortDriven = op.EffortDriven.Value;
+            Verify(pending, uid, "effortDriven", op.EffortDriven, t => t.EffortDriven, "The flag did not survive the write.");
+        }
+
+        if (op.FixedCost is not null)
+        {
+            task.FixedCost = op.FixedCost.Value;
+            Verify(pending, uid, "fixedCost", op.FixedCost, t => t.FixedCost, "The fixed cost did not survive the write.");
+        }
+
+        if (op.FixedCostAccrual is not null)
+        {
+            if (Enum.TryParse<AccrueType>(op.FixedCostAccrual, ignoreCase: true, out var accrual))
+            {
+                task.FixedCostAccrual = accrual;
+                Verify(pending, uid, "fixedCostAccrual", accrual, t => t.FixedCostAccrual,
+                    "The accrual did not survive the write.");
+            }
+            else
+            {
+                rejected.Add(WriteEngine.Reject(uid, "fixedCostAccrual", op.FixedCostAccrual, task.FixedCostAccrual,
+                    "Accrual is Start, End, or Prorated."));
+            }
+        }
+
+        if (op.BaselineCost is not null)
+        {
+            var slot = op.BaselineSlot ?? 0;
+            if (slot is < 0 or > 10)
+            {
+                rejected.Add(WriteEngine.Reject(uid, "baselineSlot", slot, null, "Baselines are numbered 0 to 10."));
+            }
+            else
+            {
+                if (slot == 0) task.BaselineCost = op.BaselineCost.Value;
+                else task.SetBaselineCost(slot, op.BaselineCost.Value);
+                Verify(pending, uid, "baselineCost", op.BaselineCost,
+                    t => slot == 0 ? t.BaselineCost : t.GetBaselineCost(slot),
+                    "The baseline cost did not survive the write.");
+            }
+        }
+
         if (op.Custom is not null)
         {
             foreach (var (field, value) in op.Custom)
             {
-                var slot = Dcma14.ParseTextSlot(field);
+                if (TaskCustomField.Parse(field) is not { } target)
+                {
+                    rejected.Add(WriteEngine.Reject(uid, field, value, null,
+                        $"'{field}' is not a field this tool writes. Use Text1-30, Number1-20, Date1-10, "
+                        + "Flag1-20 or WBS."));
+                    continue;
+                }
+
+                if (!target.TryConvert(value, out var converted))
+                {
+                    rejected.Add(WriteEngine.Reject(uid, field, value, null,
+                        $"'{value}' is not a valid {target.Kind} value for {field}."));
+                    continue;
+                }
+
                 try
                 {
-                    task.SetText(slot, value);
-                    var expected = value;
+                    target.Write(task, converted);
                     pending.Checks.Add(file =>
                     {
                         var check = file.GetTaskByUniqueID(uid);
-                        var actual = check is null ? null : Dcma14.SafeGetText(check, slot);
-                        return actual == expected
+                        var actual = check is null ? null : target.Read(check);
+                        return target.Same(converted, actual)
                             ? null
-                            : WriteEngine.Reject(uid, field, expected, actual,
+                            : WriteEngine.Reject(uid, field, value, actual,
                                 $"{field} did not survive the write.");
                     });
                 }
@@ -548,134 +675,7 @@ public static class WriteTools
                 throw new McpToolException("No operations supplied.");
             }
 
-            return WriteEngine.Run(session, dryRun, (project, rejected) =>
-            {
-                var pending = new List<PendingOp>();
-
-                foreach (var op in ops)
-                {
-                    var from = project.GetTaskByUniqueID(op.From);
-                    var to = project.GetTaskByUniqueID(op.To);
-
-                    if (from is null || to is null)
-                    {
-                        rejected.Add(WriteEngine.Reject(from is null ? op.From : op.To, "uid", null, null,
-                            "No task with that uid. Row ids shift — use the uid from tasks_query."));
-                        continue;
-                    }
-
-                    var operation = op.Op.Trim().ToLowerInvariant();
-
-                    if (operation is "link" or "relink")
-                    {
-                        if (op.From == op.To)
-                        {
-                            rejected.Add(WriteEngine.Reject(op.From, "link", $"{op.From}->{op.To}", null,
-                                "A task cannot depend on itself."));
-                            continue;
-                        }
-
-                        var cycle = FindCycle(project, op.From, op.To);
-                        if (cycle is not null)
-                        {
-                            rejected.Add(WriteEngine.Reject(op.From, "link", $"{op.From}->{op.To}", null,
-                                $"That link would create a cycle: {string.Join(" -> ", cycle)}. Nothing was applied for it."));
-                            continue;
-                        }
-                    }
-
-                    switch (operation)
-                    {
-                        case "unlink":
-                        case "relink":
-                        {
-                            var current = new PendingOp { Label = "relink" };
-                            pending.Add(current);
-                            var existing = to.Predecessors
-                                .Where(r => r.PredecessorTask?.UniqueID == op.From)
-                                .ToList();
-
-                            if (existing.Count == 0 && operation == "unlink")
-                            {
-                                rejected.Add(WriteEngine.Reject(op.To, "unlink", $"{op.From}->{op.To}", null,
-                                    "There is no dependency between those tasks to remove."));
-                                continue;
-                            }
-
-                            foreach (var relation in existing)
-                            {
-                                // MPXJ exposes no remove-relation primitive; the predecessor collection
-                                // is the only handle on it. If the list turns out to be immutable the
-                                // verification step below catches it and reports honestly.
-                                try
-                                {
-                                    to.Predecessors.Remove(relation);
-                                }
-                                catch (Exception ex)
-                                {
-                                    rejected.Add(WriteEngine.Reject(op.To, "unlink", $"{op.From}->{op.To}", null,
-                                        $"This backend could not remove the dependency: {ex.Message}. "
-                                        + "Remove it in Microsoft Project, or run where the COM backend is available."));
-                                }
-                            }
-
-                            if (operation == "unlink")
-                            {
-                                var f = op.From;
-                                var t = op.To;
-                                current.Checks.Add(file =>
-                                {
-                                    var target = file.GetTaskByUniqueID(t);
-                                    return target?.Predecessors.Any(r => r.PredecessorTask?.UniqueID == f) == true
-                                        ? WriteEngine.Reject(t, "unlink", "removed", "still linked",
-                                            "The dependency is still present after the unlink.")
-                                        : null;
-                                });
-                                continue;
-                            }
-
-                            goto case "link";
-                        }
-
-                        case "link":
-                        {
-                            var current = new PendingOp { Label = "link" };
-                            pending.Add(current);
-                            var type = MpxjMapper.ParseRelationType(op.Type ?? "FS");
-                            var lag = op.Lag is null
-                                ? MPXJ.Net.Duration.GetInstance(0, TimeUnit.Days)
-                                : MpxjMapper.ParseDuration(op.Lag);
-
-                            to.AddPredecessor(new Relation.Builder(project)
-                                .PredecessorTask(from)
-                                .SuccessorTask(to)
-                                .Type(type)
-                                .Lag(lag));
-
-                            var f = op.From;
-                            var t = op.To;
-                            current.Checks.Add(file =>
-                            {
-                                var target = file.GetTaskByUniqueID(t);
-                                var found = target?.Predecessors.FirstOrDefault(
-                                    r => r.PredecessorTask?.UniqueID == f && r.Type == type);
-                                return found is not null
-                                    ? null
-                                    : WriteEngine.Reject(t, "link", $"{f}->{t} {op.Type ?? "FS"}", null,
-                                        "The dependency was not present when re-read after the write.");
-                            });
-                            break;
-                        }
-
-                        default:
-                            rejected.Add(WriteEngine.Reject(op.From, "op", op.Op, null,
-                                $"Unknown operation '{op.Op}'. Use link, unlink, or relink."));
-                            break;
-                    }
-                }
-
-                return pending;
-            });
+            return WriteEngine.Run(session, dryRun, (project, rejected) => ApplyLinkOps(project, ops, rejected));
     });
     }
 
@@ -738,183 +738,16 @@ public static class WriteTools
                 throw new McpToolException("No operations supplied.");
             }
 
-            return WriteEngine.Run(session, dryRun, (project, rejected) =>
-            {
-                var pending = new List<PendingOp>();
-
-                foreach (var op in ops)
-                {
-                    switch (op.Op.Trim().ToLowerInvariant())
-                    {
-                        case "create":
-                        {
-                            var current = new PendingOp { Label = "create" };
-                            pending.Add(current);
-                            var resource = project.AddResource();
-                            resource.Name = op.Name ?? "New resource";
-                            // As in Project: a new resource works the project's calendar. Left without
-                            // one, Microsoft Project gives it its own default base calendar — which is
-                            // locale-dependent (9:00-13:00, 15:00-19:00 on a Spanish install) — and
-                            // every task it is assigned to moves to those hours.
-                            var resourceCalendar = resource.AddCalendar();
-                            resourceCalendar.Parent = project.DefaultCalendar;
-                            if (op.MaxUnits is not null) resource.Set(ResourceField.MaxUnits, op.MaxUnits);
-                            if (op.Type is not null && Enum.TryParse<ResourceType>(op.Type, true, out var rt))
-                            {
-                                resource.Type = rt;
-                            }
-
-                            var uid = resource.UniqueID;
-                            var expected = resource.Name;
-                            current.Checks.Add(file =>
-                            {
-                                var check = uid is null ? null : file.GetResourceByUniqueID(uid.Value);
-                                return check?.Name == expected
-                                    ? null
-                                    : WriteEngine.Reject(uid ?? -1, "name", expected, check?.Name,
-                                        "The resource could not be read back after being created.");
-                            });
-                            break;
-                        }
-
-                        case "update":
-                        {
-                            var current = new PendingOp { Label = "update" };
-                            pending.Add(current);
-                            if (op.Uid is null || project.GetResourceByUniqueID(op.Uid.Value) is not { } resource)
-                            {
-                                rejected.Add(WriteEngine.Reject(op.Uid ?? -1, "uid", op.Uid, null,
-                                    "No resource with that uid."));
-                                continue;
-                            }
-
-                            if (op.Name is not null) resource.Name = op.Name;
-                            if (op.MaxUnits is not null) resource.Set(ResourceField.MaxUnits, op.MaxUnits);
-
-                            var uid = op.Uid.Value;
-                            var expectedName = resource.Name;
-                            var expectedUnits = resource.MaxUnits;
-                            current.Checks.Add(file =>
-                            {
-                                var check = file.GetResourceByUniqueID(uid);
-                                return check is not null && check.Name == expectedName && check.MaxUnits == expectedUnits
-                                    ? null
-                                    : WriteEngine.Reject(uid, "resource", expectedName, check?.Name,
-                                        "The resource change did not survive the write.");
-                            });
-                            break;
-                        }
-
-                        case "delete":
-                        {
-                            var current = new PendingOp { Label = "delete" };
-                            pending.Add(current);
-                            if (op.Uid is null || project.GetResourceByUniqueID(op.Uid.Value) is not { } resource)
-                            {
-                                rejected.Add(WriteEngine.Reject(op.Uid ?? -1, "uid", op.Uid, null,
-                                    "No resource with that uid."));
-                                continue;
-                            }
-
-                            var uid = op.Uid.Value;
-                            project.RemoveResource(resource);
-                            current.Checks.Add(file => file.GetResourceByUniqueID(uid) is null
-                                ? null
-                                : WriteEngine.Reject(uid, "delete", "removed", "still present",
-                                    "The resource is still in the model after the delete."));
-                            break;
-                        }
-
-                        case "assign":
-                        {
-                            var current = new PendingOp { Label = "assign" };
-                            pending.Add(current);
-                            if (op.TaskUid is null || op.Uid is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(op.Uid ?? -1, "assign", null, null,
-                                    "assign needs both uid (the resource) and taskUid."));
-                                continue;
-                            }
-
-                            var task = project.GetTaskByUniqueID(op.TaskUid.Value);
-                            var resource = project.GetResourceByUniqueID(op.Uid.Value);
-                            if (task is null || resource is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(op.Uid.Value, "assign", null, null,
-                                    task is null ? "No task with that uid." : "No resource with that uid."));
-                                continue;
-                            }
-
-                            var assignment = task.AddResourceAssignment(resource);
-                            assignment.Units = op.Units ?? 100;
-
-                            var taskUid = op.TaskUid.Value;
-                            var resourceUid = op.Uid.Value;
-                            current.Checks.Add(file =>
-                            {
-                                var check = file.GetTaskByUniqueID(taskUid);
-                                return check?.ResourceAssignments.Any(a => a.Resource?.UniqueID == resourceUid) == true
-                                    ? null
-                                    : WriteEngine.Reject(taskUid, "assign", resourceUid, null,
-                                        "The assignment was not present when re-read after the write.");
-                            });
-                            break;
-                        }
-
-                        case "unassign":
-                        {
-                            var current = new PendingOp { Label = "unassign" };
-                            pending.Add(current);
-                            if (op.TaskUid is null || op.Uid is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(op.Uid ?? -1, "unassign", null, null,
-                                    "unassign needs both uid (the resource) and taskUid."));
-                                continue;
-                            }
-
-                            var task = project.GetTaskByUniqueID(op.TaskUid.Value);
-                            var existing = task?.ResourceAssignments
-                                .FirstOrDefault(a => a.Resource?.UniqueID == op.Uid.Value);
-
-                            if (existing is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(op.TaskUid.Value, "unassign", op.Uid, null,
-                                    "That resource is not assigned to that task."));
-                                continue;
-                            }
-
-                            existing.Remove();
-
-                            var taskUid = op.TaskUid.Value;
-                            var resourceUid = op.Uid.Value;
-                            current.Checks.Add(file =>
-                            {
-                                var check = file.GetTaskByUniqueID(taskUid);
-                                return check?.ResourceAssignments.Any(a => a.Resource?.UniqueID == resourceUid) != true
-                                    ? null
-                                    : WriteEngine.Reject(taskUid, "unassign", "removed", "still assigned",
-                                        "The assignment is still present after the unassign.");
-                            });
-                            break;
-                        }
-
-                        default:
-                            rejected.Add(WriteEngine.Reject(op.Uid ?? -1, "op", op.Op, null,
-                                $"Unknown operation '{op.Op}'. Use create, update, delete, assign, or unassign."));
-                            break;
-                    }
-                }
-
-                return pending;
-            });
+            return WriteEngine.Run(session, dryRun, (project, rejected) => ApplyResourceOps(project, ops, rejected));
     });
     }
 
     [McpServerTool(Name = "calendars_write")]
     [Description(
-        "Manage working calendars: create and delete them, and add non-working exceptions for "
-        + "holidays, site shutdowns or a rainy season. The weekly working-hours pattern itself is not "
-        + "editable here. " + SameContract)]
+        "Manage working calendars: create them (optionally derived from another), delete them, set the "
+        + "working week and its hours (set_week), set exceptions for holidays, shutdowns or extra working "
+        + "days with their hours (set_exception), and choose the project calendar (set_project_calendar). "
+        + "Task and resource calendars are set with tasks_write and resources_write. " + SameContract)]
     public static WriteResult CalendarsWrite(
         [Description("Document handle from project_open.")] string handle,
         [Description("The calendar operations to apply.")] CalendarOp[] ops,
@@ -927,125 +760,7 @@ public static class WriteTools
                 throw new McpToolException("No operations supplied.");
             }
 
-            return WriteEngine.Run(session, dryRun, (project, rejected) =>
-            {
-                var pending = new List<PendingOp>();
-
-                foreach (var op in ops)
-                {
-                    switch (op.Op.Trim().ToLowerInvariant())
-                    {
-                        case "create":
-                        {
-                            var current = new PendingOp { Label = "create" };
-                            pending.Add(current);
-                            if (string.IsNullOrWhiteSpace(op.Name))
-                            {
-                                rejected.Add(WriteEngine.Reject(-1, "name", null, null, "create needs a calendar name."));
-                                continue;
-                            }
-
-                            var calendar = project.AddDefaultBaseCalendar();
-                            calendar.Name = op.Name;
-                            var expected = op.Name;
-                            current.Checks.Add(file => file.GetCalendarByName(expected) is not null
-                                ? null
-                                : WriteEngine.Reject(-1, "calendar", expected, null,
-                                    "The calendar could not be read back after being created."));
-                            break;
-                        }
-
-                        case "delete":
-                        {
-                            var current = new PendingOp { Label = "delete" };
-                            pending.Add(current);
-                            var calendar = op.Name is null ? null : project.GetCalendarByName(op.Name);
-                            if (calendar is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(-1, "name", op.Name, null, "No calendar with that name."));
-                                continue;
-                            }
-
-                            var expected = op.Name!;
-                            project.RemoveCalendar(calendar);
-                            current.Checks.Add(file => file.GetCalendarByName(expected) is null
-                                ? null
-                                : WriteEngine.Reject(-1, "delete", "removed", "still present",
-                                    "The calendar is still in the model after the delete."));
-                            break;
-                        }
-
-                        case "set_exception":
-                        {
-                            var current = new PendingOp { Label = "set_exception" };
-                            pending.Add(current);
-                            // A schedule read from a file may carry calendars without one of them being
-                            // flagged as the project default; falling back to the first is better than
-                            // refusing to add a holiday.
-                            var calendar = op.Name is not null
-                                ? project.GetCalendarByName(op.Name)
-                                : project.DefaultCalendar ?? project.Calendars.FirstOrDefault();
-
-                            if (calendar is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(-1, "name", op.Name, null,
-                                    op.Name is null
-                                        ? "This schedule has no calendar at all. Create one first with "
-                                          + "op='create'."
-                                        : $"No calendar named '{op.Name}'. Call project_info to list them."));
-                                continue;
-                            }
-
-                            var fromDate = QueryTools.ParseDate(op.From);
-                            if (fromDate is null)
-                            {
-                                rejected.Add(WriteEngine.Reject(-1, "from", op.From, null,
-                                    "set_exception needs a From date, yyyy-MM-dd."));
-                                continue;
-                            }
-
-                            if (op.Working == true)
-                            {
-                                rejected.Add(new RejectedWrite
-                                {
-                                    Field = "working",
-                                    Reason = "This backend can only add non-working exceptions (holidays, shutdowns, "
-                                             + "weather stand-downs). Turning a non-working day into a working one "
-                                             + "means editing the calendar's hour ranges — do that in Microsoft Project.",
-                                });
-                                continue;
-                            }
-
-                            var toDate = QueryTools.ParseDate(op.To) ?? fromDate.Value;
-                            var start = DateOnly.FromDateTime(fromDate.Value);
-                            var end = DateOnly.FromDateTime(toDate);
-                            calendar.AddCalendarException(start, end);
-
-                            var calendarName = calendar.Name;
-                            current.Checks.Add(file =>
-                            {
-                                var check = calendarName is null ? null : file.GetCalendarByName(calendarName);
-                                return check?.GetException(start) is not null
-                                    ? null
-                                    : WriteEngine.Reject(-1, "exception", start.ToString("yyyy-MM-dd"), null,
-                                        "The exception was not present when re-read after the write.");
-                            });
-                            break;
-                        }
-
-                        default:
-                            rejected.Add(WriteEngine.Reject(-1, "op", op.Op, null,
-                                op.Op.Trim().Equals("set_working_hours", StringComparison.OrdinalIgnoreCase)
-                                    ? "The weekly working-hours pattern is not editable through this "
-                                      + "backend. Use set_exception for specific dates, or change the "
-                                      + "pattern in Microsoft Project."
-                                    : $"Unknown operation '{op.Op}'. Use create, delete, or set_exception."));
-                            break;
-                    }
-                }
-
-                return pending;
-            });
+            return WriteEngine.Run(session, dryRun, (project, rejected) => ApplyCalendarOps(project, ops, rejected));
     });
     }
 
@@ -1077,6 +792,9 @@ public static class WriteTools
         Dictionary<string, double>? budget = null,
         [Description("For load_budget: or a CSV of code,amount.")] string? budgetPath = null,
         [Description("For load_budget: the task field holding the code. Defaults to Text1.")] string codeField = "Text1",
+        [Description("For level_resources: delay tasks only within their slack, so the finish date cannot move.")]
+        bool withinSlack = false,
+        [Description("For level_resources: let levelling split remaining work.")] bool levelingCanSplit = true,
         [Description("Simulate against a copy and report the impact without committing.")] bool dryRun = false)
     {
         return SessionStore.UseForWrite(handle, session =>
@@ -1333,6 +1051,37 @@ public static class WriteTools
                         break;
                     }
 
+                    case "level_resources":
+                    {
+                        var current = new PendingOp { Label = "level_resources", SchedulesItself = true };
+                        pending.Add(current);
+                        var before = ResourceAnalyzer.Find(project).Count;
+                        var report = Analysis.ProjectScheduler.Run(project, (withinSlack, levelingCanSplit));
+                        Writes.ProgressRules.RollUp(project);
+                        var after = ResourceAnalyzer.Find(project).Count;
+                        var slackOnly = withinSlack;
+                        current.Checks.Add(_ => report.Engine == Analysis.Scheduler.MicrosoftProject
+                            ? null
+                            : WriteEngine.Reject(-1, "level_resources", "levelled by Microsoft Project", report.Engine,
+                                "Levelling only runs in Microsoft Project."));
+                        if (after > 0)
+                        {
+                            rejected.Add(new RejectedWrite
+                            {
+                                Field = "level_resources",
+                                Requested = $"{before} overallocation window(s)",
+                                Actual = $"{after} remain",
+                                Reason = slackOnly
+                                    ? "Levelled within slack only: what remains cannot be resolved without moving the finish. "
+                                      + "Level again with withinSlack=false, add resources, or accept it."
+                                    : "Microsoft Project levelled what it could; what remains needs more resources or "
+                                      + "a change of logic. This counts as applied.",
+                            });
+                        }
+
+                        break;
+                    }
+
                     case "reschedule_incomplete":
                     {
                         var current = new PendingOp { Label = "reschedule_incomplete", SchedulesItself = true };
@@ -1395,6 +1144,728 @@ public static class WriteTools
                 return pending;
             });
     });
+    }
+
+    internal static List<PendingOp> ApplyTaskOps(ProjectFile project, IReadOnlyList<TaskOp> ops, List<RejectedWrite> rejected)
+    {
+        var pending = new List<PendingOp>();
+        var keyed = new Dictionary<string, MPXJ.Net.Task>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var op in ops)
+        {
+            switch (op.Op.Trim().ToLowerInvariant())
+            {
+                case "create":
+                {
+                    var current = new PendingOp { Label = "create" };
+                    pending.Add(current);
+                    var parent = op.ParentUid is not null ? project.GetTaskByUniqueID(op.ParentUid.Value) : null;
+                    if (op.ParentUid is not null && parent is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(op.ParentUid.Value, "parentUid", op.ParentUid, null,
+                            "No task with that uid to parent under."));
+                        continue;
+                    }
+
+                    if (op.ParentKey is not null)
+                    {
+                        if (!keyed.TryGetValue(op.ParentKey, out parent))
+                        {
+                            rejected.Add(WriteEngine.Reject(-1, "parentKey", op.ParentKey, null,
+                                "No task with that key was created earlier in this batch."));
+                            continue;
+                        }
+                    }
+
+                    var created = parent is null ? project.AddTask() : parent.AddTask();
+                    EnsureUniqueId(project, created);
+                    Writes.Structure.Place(project, created, parent);
+                    if (op.Key is not null)
+                    {
+                        keyed[op.Key] = created;
+                    }
+                    created.Name = op.Name ?? "New task";
+                    ApplyFields(project, created, op, rejected, current, isNew: true);
+                    GiveDatesIfMissing(project, created);
+
+                    var newUid = created.UniqueID;
+                    var expectedName = created.Name;
+                    current.Checks.Add(file =>
+                    {
+                        var check = newUid is null ? null : file.GetTaskByUniqueID(newUid.Value);
+                        return check is null
+                            ? WriteEngine.Reject(newUid ?? -1, "create", op.Name, null,
+                                "The task was added but could not be read back afterwards.")
+                            : check.Name != expectedName
+                                ? WriteEngine.Reject(newUid!.Value, "name", expectedName, check.Name,
+                                    "The name did not survive the write.")
+                                : null;
+                    });
+                    break;
+                }
+
+                case "update":
+                {
+                    var current = new PendingOp { Label = "update" };
+                    pending.Add(current);
+                    if (op.Uid is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "uid", null, null, "update needs a uid."));
+                        continue;
+                    }
+
+                    var task = project.GetTaskByUniqueID(op.Uid.Value);
+                    if (task is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(op.Uid.Value, "uid", op.Uid, null,
+                            "No task with that uid. Row ids shift — use the uid from tasks_query."));
+                        continue;
+                    }
+
+                    ApplyFields(project, task, op, rejected, current, isNew: false);
+                    break;
+                }
+
+                case "delete":
+                {
+                    var current = new PendingOp { Label = "delete" };
+                    pending.Add(current);
+                    if (op.Uid is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "uid", null, null, "delete needs a uid."));
+                        continue;
+                    }
+
+                    var task = project.GetTaskByUniqueID(op.Uid.Value);
+                    if (task is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(op.Uid.Value, "uid", op.Uid, null,
+                            "No task with that uid."));
+                        continue;
+                    }
+
+                    var doomed = op.Uid.Value;
+                    var childCount = task.ChildTasks.Count;
+                    project.RemoveTask(task);
+                    current.Checks.Add(file => file.GetTaskByUniqueID(doomed) is null
+                        ? null
+                        : WriteEngine.Reject(doomed, "delete", "removed", "still present",
+                            "The task is still in the model after the delete."));
+
+                    if (childCount > 0)
+                    {
+                        rejected.Add(new RejectedWrite
+                        {
+                            Uid = doomed,
+                            Field = "delete",
+                            Reason = $"Deleting this summary task also removed its {childCount} child task(s). "
+                                     + "That is counted as one applied operation.",
+                        });
+                    }
+
+                    break;
+                }
+
+                case "outline":
+                {
+                    var current = new PendingOp { Label = "outline" };
+                    pending.Add(current);
+                    if (op.Uid is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "uid", null, null, $"{op.Op} needs a uid."));
+                        continue;
+                    }
+
+                    var task = project.GetTaskByUniqueID(op.Uid.Value);
+                    if (task is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(op.Uid.Value, "uid", op.Uid, null, "No task with that uid."));
+                        continue;
+                    }
+
+                    // The level is what is set; Structure.Normalize, at the end of the batch,
+                    // rebuilds the hierarchy from it, as Project does from row order and level.
+                    var currentLevel = task.OutlineLevel ?? 1;
+                    var targetLevel = Math.Max(1, currentLevel + (op.Indent ?? 0));
+                    task.OutlineLevel = targetLevel;
+
+                    var uid = op.Uid.Value;
+                    current.Checks.Add(file =>
+                    {
+                        var check = file.GetTaskByUniqueID(uid);
+                        return check?.OutlineLevel == targetLevel
+                            ? null
+                            : WriteEngine.Reject(uid, "outlineLevel", targetLevel, check?.OutlineLevel,
+                                "The outline level did not survive the write.");
+                    });
+
+                    break;
+                }
+
+                default:
+                    rejected.Add(WriteEngine.Reject(op.Uid ?? -1, "op", op.Op, null,
+                        op.Op.Trim().Equals("move", StringComparison.OrdinalIgnoreCase)
+                            ? "There is no 'move' operation: this backend cannot reorder tasks "
+                              + "within the outline. Use 'outline' with indent to change a task's "
+                              + "level, or reorder in Microsoft Project."
+                            : $"Unknown operation '{op.Op}'. Use create, update, delete, or outline."));
+                    break;
+            }
+        }
+
+        // Any of these ops can change detail-task progress; summaries show it rolled up.
+        ProgressRules.RollUp(project);
+        Writes.Structure.Normalize(project);
+        return pending;
+    }
+
+    internal static List<PendingOp> ApplyLinkOps(ProjectFile project, IReadOnlyList<LinkOp> ops, List<RejectedWrite> rejected)
+    {
+        var pending = new List<PendingOp>();
+
+        foreach (var op in ops)
+        {
+            var from = project.GetTaskByUniqueID(op.From);
+            var to = project.GetTaskByUniqueID(op.To);
+
+            if (from is null || to is null)
+            {
+                rejected.Add(WriteEngine.Reject(from is null ? op.From : op.To, "uid", null, null,
+                    "No task with that uid. Row ids shift — use the uid from tasks_query."));
+                continue;
+            }
+
+            var operation = op.Op.Trim().ToLowerInvariant();
+
+            if (operation is "link" or "relink")
+            {
+                if (op.From == op.To)
+                {
+                    rejected.Add(WriteEngine.Reject(op.From, "link", $"{op.From}->{op.To}", null,
+                        "A task cannot depend on itself."));
+                    continue;
+                }
+
+                var cycle = FindCycle(project, op.From, op.To);
+                if (cycle is not null)
+                {
+                    rejected.Add(WriteEngine.Reject(op.From, "link", $"{op.From}->{op.To}", null,
+                        $"That link would create a cycle: {string.Join(" -> ", cycle)}. Nothing was applied for it."));
+                    continue;
+                }
+            }
+
+            switch (operation)
+            {
+                case "unlink":
+                case "relink":
+                {
+                    var current = new PendingOp { Label = "relink" };
+                    pending.Add(current);
+                    var existing = to.Predecessors
+                        .Where(r => r.PredecessorTask?.UniqueID == op.From)
+                        .ToList();
+
+                    if (existing.Count == 0 && operation == "unlink")
+                    {
+                        rejected.Add(WriteEngine.Reject(op.To, "unlink", $"{op.From}->{op.To}", null,
+                            "There is no dependency between those tasks to remove."));
+                        continue;
+                    }
+
+                    foreach (var relation in existing)
+                    {
+                        // MPXJ exposes no remove-relation primitive; the predecessor collection
+                        // is the only handle on it. If the list turns out to be immutable the
+                        // verification step below catches it and reports honestly.
+                        try
+                        {
+                            to.Predecessors.Remove(relation);
+                        }
+                        catch (Exception ex)
+                        {
+                            rejected.Add(WriteEngine.Reject(op.To, "unlink", $"{op.From}->{op.To}", null,
+                                $"This backend could not remove the dependency: {ex.Message}. "
+                                + "Remove it in Microsoft Project, or run where the COM backend is available."));
+                        }
+                    }
+
+                    if (operation == "unlink")
+                    {
+                        var f = op.From;
+                        var t = op.To;
+                        current.Checks.Add(file =>
+                        {
+                            var target = file.GetTaskByUniqueID(t);
+                            return target?.Predecessors.Any(r => r.PredecessorTask?.UniqueID == f) == true
+                                ? WriteEngine.Reject(t, "unlink", "removed", "still linked",
+                                    "The dependency is still present after the unlink.")
+                                : null;
+                        });
+                        continue;
+                    }
+
+                    goto case "link";
+                }
+
+                case "link":
+                {
+                    var current = new PendingOp { Label = "link" };
+                    pending.Add(current);
+                    var type = MpxjMapper.ParseRelationType(op.Type ?? "FS");
+                    var lag = op.Lag is null
+                        ? MPXJ.Net.Duration.GetInstance(0, TimeUnit.Days)
+                        : MpxjMapper.ParseDuration(op.Lag);
+
+                    to.AddPredecessor(new Relation.Builder(project)
+                        .PredecessorTask(from)
+                        .SuccessorTask(to)
+                        .Type(type)
+                        .Lag(lag));
+
+                    var f = op.From;
+                    var t = op.To;
+                    current.Checks.Add(file =>
+                    {
+                        var target = file.GetTaskByUniqueID(t);
+                        var found = target?.Predecessors.FirstOrDefault(
+                            r => r.PredecessorTask?.UniqueID == f && r.Type == type);
+                        return found is not null
+                            ? null
+                            : WriteEngine.Reject(t, "link", $"{f}->{t} {op.Type ?? "FS"}", null,
+                                "The dependency was not present when re-read after the write.");
+                    });
+                    break;
+                }
+
+                default:
+                    rejected.Add(WriteEngine.Reject(op.From, "op", op.Op, null,
+                        $"Unknown operation '{op.Op}'. Use link, unlink, or relink."));
+                    break;
+            }
+        }
+
+        return pending;
+    }
+
+    internal static List<PendingOp> ApplyResourceOps(ProjectFile project, IReadOnlyList<ResourceOp> ops, List<RejectedWrite> rejected)
+    {
+        var pending = new List<PendingOp>();
+
+        foreach (var op in ops)
+        {
+            switch (op.Op.Trim().ToLowerInvariant())
+            {
+                case "create":
+                {
+                    var current = new PendingOp { Label = "create" };
+                    pending.Add(current);
+                    var resource = project.AddResource();
+                    Writes.Structure.EnsureIds(project);
+                    current.Rollback = () => project.RemoveResource(resource);
+                    resource.Name = op.Name ?? "New resource";
+                    // As in Project: a new resource works the project's calendar. Left without
+                    // one, Microsoft Project gives it its own default base calendar — which is
+                    // locale-dependent (9:00-13:00, 15:00-19:00 on a Spanish install) — and
+                    // every task it is assigned to moves to those hours.
+                    var resourceCalendar = resource.AddCalendar();
+                    resourceCalendar.Parent = project.DefaultCalendar;
+                    if (op.Type is not null && Enum.TryParse<ResourceType>(op.Type, true, out var rt))
+                    {
+                        resource.Type = rt;
+                    }
+
+                    ApplyResourceFields(project, resource, op, current, rejected);
+                    var uid = resource.UniqueID;
+                    var expected = resource.Name;
+                    current.Checks.Add(file =>
+                    {
+                        var check = uid is null ? null : file.GetResourceByUniqueID(uid.Value);
+                        return check?.Name == expected
+                            ? null
+                            : WriteEngine.Reject(uid ?? -1, "name", expected, check?.Name,
+                                "The resource could not be read back after being created.");
+                    });
+                    break;
+                }
+
+                case "update":
+                {
+                    var current = new PendingOp { Label = "update" };
+                    pending.Add(current);
+                    if (op.Uid is null || project.GetResourceByUniqueID(op.Uid.Value) is not { } resource)
+                    {
+                        rejected.Add(WriteEngine.Reject(op.Uid ?? -1, "uid", op.Uid, null,
+                            "No resource with that uid."));
+                        continue;
+                    }
+
+                    if (op.Name is not null) resource.Name = op.Name;
+                    ApplyResourceFields(project, resource, op, current, rejected);
+
+                    var uid = op.Uid.Value;
+                    var expectedName = resource.Name;
+                    current.Checks.Add(file =>
+                    {
+                        var check = file.GetResourceByUniqueID(uid);
+                        return check is not null && check.Name == expectedName
+                            ? null
+                            : WriteEngine.Reject(uid, "name", expectedName, check?.Name,
+                                "The resource change did not survive the write.");
+                    });
+                    break;
+                }
+
+                case "delete":
+                {
+                    var current = new PendingOp { Label = "delete" };
+                    pending.Add(current);
+                    if (op.Uid is null || project.GetResourceByUniqueID(op.Uid.Value) is not { } resource)
+                    {
+                        rejected.Add(WriteEngine.Reject(op.Uid ?? -1, "uid", op.Uid, null,
+                            "No resource with that uid."));
+                        continue;
+                    }
+
+                    var uid = op.Uid.Value;
+                    project.RemoveResource(resource);
+                    current.Checks.Add(file => file.GetResourceByUniqueID(uid) is null
+                        ? null
+                        : WriteEngine.Reject(uid, "delete", "removed", "still present",
+                            "The resource is still in the model after the delete."));
+                    break;
+                }
+
+                case "assign":
+                {
+                    var current = new PendingOp { Label = "assign" };
+                    pending.Add(current);
+                    if (op.TaskUid is null || op.Uid is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(op.Uid ?? -1, "assign", null, null,
+                            "assign needs both uid (the resource) and taskUid."));
+                        continue;
+                    }
+
+                    var task = project.GetTaskByUniqueID(op.TaskUid.Value);
+                    var resource = project.GetResourceByUniqueID(op.Uid.Value);
+                    if (task is null || resource is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(op.Uid.Value, "assign", null, null,
+                            task is null ? "No task with that uid." : "No resource with that uid."));
+                        continue;
+                    }
+
+                    var assignment = task.AddResourceAssignment(resource);
+                    assignment.Units = op.Units ?? 100;
+
+                    // Assigned to work already finished, it is finished too. Left open, Project
+                    // gives it remaining work, drops the task to 99% and schedules the rest
+                    // after the status date — a material costed onto a finished task moved the
+                    // finish by 16 days.
+                    if (task.ActualFinish is not null || (task.PercentageComplete ?? 0) >= 100)
+                    {
+                        assignment.ActualStart = task.ActualStart ?? task.Start;
+                        assignment.ActualFinish = task.ActualFinish ?? task.Finish;
+                        assignment.PercentageWorkComplete = 100;
+
+                        // Project derives an assignment's progress from its work, so the work is
+                        // stated as done: a crew's hours over the task, a material's quantity.
+                        var amount = resource.Type == ResourceType.Material
+                            ? assignment.Units ?? 0
+                            : (MpxjMapper.Hours(task.ActualDuration ?? task.Duration, MpxjMapper.HoursPerDay) ?? 0)
+                              * (assignment.Units ?? 100) / 100.0;
+                        var done = MPXJ.Net.Duration.GetInstance(amount, TimeUnit.Hours);
+                        assignment.Work = done;
+                        assignment.ActualWork = done;
+                        assignment.RemainingWork = MPXJ.Net.Duration.GetInstance(0, TimeUnit.Hours);
+                    }
+
+                    var taskUid = op.TaskUid.Value;
+                    var resourceUid = op.Uid.Value;
+                    current.Checks.Add(file =>
+                    {
+                        var check = file.GetTaskByUniqueID(taskUid);
+                        return check?.ResourceAssignments.Any(a => a.Resource?.UniqueID == resourceUid) == true
+                            ? null
+                            : WriteEngine.Reject(taskUid, "assign", resourceUid, null,
+                                "The assignment was not present when re-read after the write.");
+                    });
+                    break;
+                }
+
+                case "unassign":
+                {
+                    var current = new PendingOp { Label = "unassign" };
+                    pending.Add(current);
+                    if (op.TaskUid is null || op.Uid is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(op.Uid ?? -1, "unassign", null, null,
+                            "unassign needs both uid (the resource) and taskUid."));
+                        continue;
+                    }
+
+                    var task = project.GetTaskByUniqueID(op.TaskUid.Value);
+                    var existing = task?.ResourceAssignments
+                        .FirstOrDefault(a => a.Resource?.UniqueID == op.Uid.Value);
+
+                    if (existing is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(op.TaskUid.Value, "unassign", op.Uid, null,
+                            "That resource is not assigned to that task."));
+                        continue;
+                    }
+
+                    existing.Remove();
+
+                    var taskUid = op.TaskUid.Value;
+                    var resourceUid = op.Uid.Value;
+                    current.Checks.Add(file =>
+                    {
+                        var check = file.GetTaskByUniqueID(taskUid);
+                        return check?.ResourceAssignments.Any(a => a.Resource?.UniqueID == resourceUid) != true
+                            ? null
+                            : WriteEngine.Reject(taskUid, "unassign", "removed", "still assigned",
+                                "The assignment is still present after the unassign.");
+                    });
+                    break;
+                }
+
+                default:
+                    rejected.Add(WriteEngine.Reject(op.Uid ?? -1, "op", op.Op, null,
+                        $"Unknown operation '{op.Op}'. Use create, update, delete, assign, or unassign."));
+                    break;
+            }
+        }
+
+        // A new assignment on a schedule read from a file has no unique id either.
+        Writes.Structure.Normalize(project);
+        return pending;
+    }
+
+    internal static List<PendingOp> ApplyCalendarOps(ProjectFile project, IReadOnlyList<CalendarOp> ops, List<RejectedWrite> rejected)
+    {
+        var pending = new List<PendingOp>();
+
+        foreach (var op in ops)
+        {
+            switch (op.Op.Trim().ToLowerInvariant())
+            {
+                case "create":
+                {
+                    var current = new PendingOp { Label = "create" };
+                    pending.Add(current);
+                    if (string.IsNullOrWhiteSpace(op.Name))
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "name", null, null, "create needs a calendar name."));
+                        continue;
+                    }
+
+                    if (project.GetCalendarByName(op.Name) is not null)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "name", op.Name, op.Name,
+                            "A calendar with that name already exists."));
+                        continue;
+                    }
+
+                    ProjectCalendar? basis = null;
+                    if (op.BasedOn is not null && (basis = project.GetCalendarByName(op.BasedOn)) is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "basedOn", op.BasedOn, null,
+                            $"No calendar named '{op.BasedOn}'. Call project_info to list them."));
+                        continue;
+                    }
+
+                    // Always a base calendar: one derived from another is, to Microsoft Project, a
+                    // resource's calendar, and it drops it as a task or project calendar. basedOn
+                    // copies the week and the exceptions instead.
+                    var calendar = project.AddDefaultBaseCalendar();
+                    if (basis is not null)
+                    {
+                        Writes.CalendarEdits.CopyInto(basis, calendar);
+                    }
+
+                    calendar.Name = op.Name;
+                    Writes.Structure.EnsureIds(project);
+                    var expected = op.Name;
+                    current.Checks.Add(file => file.GetCalendarByName(expected) is not null
+                        ? null
+                        : WriteEngine.Reject(-1, "calendar", expected, null,
+                            "The calendar could not be read back after being created."));
+                    break;
+                }
+
+                case "delete":
+                {
+                    var current = new PendingOp { Label = "delete" };
+                    pending.Add(current);
+                    var calendar = op.Name is null ? null : project.GetCalendarByName(op.Name);
+                    if (calendar is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "name", op.Name, null, "No calendar with that name."));
+                        continue;
+                    }
+
+                    var expected = op.Name!;
+                    project.RemoveCalendar(calendar);
+                    current.Checks.Add(file => file.GetCalendarByName(expected) is null
+                        ? null
+                        : WriteEngine.Reject(-1, "delete", "removed", "still present",
+                            "The calendar is still in the model after the delete."));
+                    break;
+                }
+
+                case "set_exception":
+                {
+                    var current = new PendingOp { Label = "set_exception" };
+                    pending.Add(current);
+                    // A schedule read from a file may carry calendars without one of them being
+                    // flagged as the project default; falling back to the first is better than
+                    // refusing to add a holiday.
+                    var calendar = op.Name is not null
+                        ? project.GetCalendarByName(op.Name)
+                        : project.DefaultCalendar ?? project.Calendars.FirstOrDefault();
+
+                    if (calendar is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "name", op.Name, null,
+                            op.Name is null
+                                ? "This schedule has no calendar at all. Create one first with "
+                                  + "op='create'."
+                                : $"No calendar named '{op.Name}'. Call project_info to list them."));
+                        continue;
+                    }
+
+                    var fromDate = QueryTools.ParseDate(op.From);
+                    if (fromDate is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "from", op.From, null,
+                            "set_exception needs a From date, yyyy-MM-dd."));
+                        continue;
+                    }
+
+                    var exceptionHours = op.Working == true
+                        ? Writes.CalendarEdits.ParseHours(op.Hours ?? "08:00-12:00,13:00-17:00")
+                        : Array.Empty<(TimeOnly, TimeOnly)>();
+                    if (exceptionHours is null || op.Working == true && exceptionHours.Count == 0)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "hours", op.Hours, null,
+                            "A working exception needs hours like '08:00-12:00,13:00-17:00', in order "
+                            + "and not overlapping."));
+                        continue;
+                    }
+
+                    var toDate = QueryTools.ParseDate(op.To) ?? fromDate.Value;
+                    var start = DateOnly.FromDateTime(fromDate.Value);
+                    var end = DateOnly.FromDateTime(toDate);
+                    var exception = calendar.AddCalendarException(start, end);
+                    foreach (var (from, to) in exceptionHours)
+                    {
+                        exception.Add(new TimeOnlyRange(from, to));
+                    }
+
+                    var wantWorking = exceptionHours.Count > 0;
+                    var calendarName = calendar.Name;
+                    current.Checks.Add(file =>
+                    {
+                        var check = calendarName is null ? null : file.GetCalendarByName(calendarName);
+                        return check?.GetException(start) is { } found && found.Working == wantWorking
+                            ? null
+                            : WriteEngine.Reject(-1, "exception", start.ToString("yyyy-MM-dd"), null,
+                                "The exception was not present when re-read after the write.");
+                    });
+                    break;
+                }
+
+                case "set_week":
+                case "set_working_hours":
+                {
+                    var current = new PendingOp { Label = "set_week" };
+                    pending.Add(current);
+                    var calendar = op.Name is not null
+                        ? project.GetCalendarByName(op.Name)
+                        : project.DefaultCalendar ?? project.Calendars.FirstOrDefault();
+                    if (calendar is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "name", op.Name, null,
+                            $"No calendar named '{op.Name}'. Call project_info to list them."));
+                        continue;
+                    }
+
+                    var days = Writes.CalendarEdits.ParseDays(op.Days);
+                    if (days is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "days", op.Days, null,
+                            "set_week needs days like 'mon-fri', 'sat' or 'lun,mie,vie'."));
+                        continue;
+                    }
+
+                    var hours = Writes.CalendarEdits.ParseHours(op.Hours);
+                    if (hours is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "hours", op.Hours, null,
+                            "Hours are ranges like '08:00-12:00,13:00-17:00', in order and not "
+                            + "overlapping; empty makes the days non-working."));
+                        continue;
+                    }
+
+                    Writes.CalendarEdits.SetWeek(calendar, days, hours);
+                    var calendarName = calendar.Name;
+                    var wanted = Writes.CalendarEdits.Describe(hours);
+                    foreach (var day in days)
+                    {
+                        current.Checks.Add(file =>
+                        {
+                            var check = calendarName is null ? null : file.GetCalendarByName(calendarName);
+                            var actual = check is null ? null : Writes.CalendarEdits.Describe(check, day);
+                            return actual == wanted
+                                ? null
+                                : WriteEngine.Reject(-1, day.ToString(), wanted, actual,
+                                    "The working hours did not survive the write.");
+                        });
+                    }
+
+                    break;
+                }
+
+                case "set_project_calendar":
+                {
+                    var current = new PendingOp { Label = "set_project_calendar" };
+                    pending.Add(current);
+                    var calendar = op.Name is null ? null : project.GetCalendarByName(op.Name);
+                    if (calendar is null)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "name", op.Name, null,
+                            $"No calendar named '{op.Name}'. Call project_info to list them."));
+                        continue;
+                    }
+
+                    if (calendar.Parent is not null)
+                    {
+                        rejected.Add(WriteEngine.Reject(-1, "name", op.Name, null,
+                            "The project calendar has to be a base calendar; this one derives from "
+                            + $"'{calendar.Parent.Name}'."));
+                        continue;
+                    }
+
+                    project.DefaultCalendar = calendar;
+                    var expected = calendar.Name;
+                    current.Checks.Add(file => file.DefaultCalendar?.Name == expected
+                        ? null
+                        : WriteEngine.Reject(-1, "projectCalendar", expected, file.DefaultCalendar?.Name,
+                            "The project calendar did not survive the write."));
+                    break;
+                }
+
+                default:
+                    rejected.Add(WriteEngine.Reject(-1, "op", op.Op, null,
+                        $"Unknown operation '{op.Op}'. Use create, delete, set_week, set_exception, "
+                        + "or set_project_calendar."));
+                    break;
+            }
+        }
+
+        return pending;
     }
 
     private static DateTime? SafeBaselineFinish(MPXJ.Net.Task task, int slot)

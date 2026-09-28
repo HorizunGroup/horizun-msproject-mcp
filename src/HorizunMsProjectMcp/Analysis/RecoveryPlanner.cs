@@ -29,6 +29,9 @@ public sealed record RecoveryOption
     public int NewNegativeFloat { get; init; }
     public required string HowToApply { get; init; }
     public IReadOnlyList<string> Risks { get; init; } = Array.Empty<string>();
+
+    /// <summary>The change itself, to replay in the combined option. Not serialised.</summary>
+    internal Action<ProjectFile>? Mutate { get; init; }
 }
 
 public sealed record RecoveryReport
@@ -63,6 +66,7 @@ public sealed record RecoveryReport
 /// </remarks>
 public static class RecoveryPlanner
 {
+
     public static RecoveryReport Analyse(
         ProjectFile project, DateTime statusDate, DateTime? targetFinish, int maxOptions)
     {
@@ -214,15 +218,32 @@ public static class RecoveryPlanner
         }
 
         var options = new List<RecoveryOption>();
-        var criticalChain = leaves.Where(t => t.Critical).ToList();
+        var open = leaves.Where(t => (t.PercentageComplete ?? 0) < 100).ToList();
+        var criticalChain = open.Where(t => t.Critical).ToList();
+
+        // A schedule nobody has calculated since it was edited marks nothing critical. The driving
+        // chain is still the one with the least float.
+        if (criticalChain.Count == 0)
+        {
+            var least = open.Select(t => MpxjMapper.Days(t.TotalSlack)).Where(d => d is not null).DefaultIfEmpty().Min();
+            if (least is not null)
+            {
+                criticalChain = open.Where(t => (MpxjMapper.Days(t.TotalSlack) ?? double.MaxValue) <= least + 0.5).ToList();
+                notes.Add($"No open task is marked critical; the {criticalChain.Count} with the least total float "
+                          + $"({least:0.#} d) were treated as the driving chain.");
+            }
+        }
 
         if (criticalChain.Count == 0)
         {
             notes.Add(
-                "No task is marked critical, so there is no driving chain to compress. Run schedule_qa — "
-                + "a schedule where almost everything carries float usually has missing successor logic.");
+                "There is no driving chain to compress: no open task is critical and none carries float "
+                + "figures. Recalculate (schedule_update op='recalculate'), then run schedule_qa — a "
+                + "schedule where almost everything floats usually has missing successor logic.");
             return options;
         }
+
+        void Skip(string lever, string why) => notes.Add($"{lever}: {why}");
 
         // Lever 1 — remove the lags sitting on the driving chain. Waiting time is the cheapest
         // thing to recover because nobody has to work faster.
@@ -277,10 +298,16 @@ public static class RecoveryPlanner
                 }));
         }
 
-        // Lever 2 — fast-track: turn finish-to-start into start-to-start on the longest critical
-        // tasks so the work overlaps.
+        else
+        {
+            Skip("remove_lags_on_critical_path", "no lag sits on the driving chain.");
+        }
+
+        // Lever 2 — fast-track: finish-to-start becomes start-to-start with a lag of half the
+        // predecessor, so the successor starts once half of it is done — the partial overlap a site
+        // actually runs, rather than starting both on the same day.
         var fastTrackable = criticalChain
-            .Where(t => (MpxjMapper.Days(t.Duration) ?? 0) >= 5)
+            .Where(t => (MpxjMapper.Days(t.Duration) ?? 0) >= 2)
             .SelectMany(t => t.Predecessors
                 .Where(r => r.Type is null or RelationType.FinishStart && r.PredecessorTask is not null)
                 .Select(r => (Task: t, Relation: r)))
@@ -297,9 +324,11 @@ public static class RecoveryPlanner
             options.Add(Simulate(
                 project, baseline.Value,
                 lever: "fast_track_critical_path",
-                summary: $"Overlap {pairs.Count} critical hand-off(s): finish-to-start becomes start-to-start.",
+                summary: $"Overlap {pairs.Count} critical hand-off(s): finish-to-start becomes start-to-start "
+                         + "once half of the predecessor is done.",
                 uids: pairs.Select(x => x.To).Distinct().ToList(),
-                howToApply: "links_write with op='relink' and type='SS' on the listed dependencies.",
+                howToApply: "links_write with op='relink', type='SS' and a lag of half the predecessor's duration "
+                            + "on the listed dependencies (by zone or floor where the work allows it).",
                 risks: new[]
                 {
                     "Overlapping trades raises rework risk and congestion on site. Confirm each pair "
@@ -318,13 +347,16 @@ public static class RecoveryPlanner
 
                         try
                         {
-                            var lag = relation.Lag;
+                            var predecessorDays = MpxjMapper.Days(relation.PredecessorTask!.RemainingDuration)
+                                                  ?? MpxjMapper.Days(relation.PredecessorTask!.Duration) ?? 0;
+                            var lagDays = Math.Max(0, Math.Round(predecessorDays / 2, 1)
+                                                      + (MpxjMapper.Days(relation.Lag) ?? 0));
                             target.Predecessors.Remove(relation);
                             target.AddPredecessor(new Relation.Builder(clone)
                                 .PredecessorTask(relation.PredecessorTask!)
                                 .SuccessorTask(target)
                                 .Type(RelationType.StartStart)
-                                .Lag(lag ?? MPXJ.Net.Duration.GetInstance(0, TimeUnit.Days)));
+                                .Lag(MPXJ.Net.Duration.GetInstance(lagDays, TimeUnit.Days)));
                         }
                         catch
                         {
@@ -332,6 +364,11 @@ public static class RecoveryPlanner
                         }
                     }
                 }));
+        }
+
+        else
+        {
+            Skip("fast_track_critical_path", "no finish-to-start hand-off on the driving chain into a task of 2 days or more.");
         }
 
         // Lever 3 — crash: shorten the longest tasks on the driving chain by a quarter.
@@ -377,8 +414,80 @@ public static class RecoveryPlanner
                 }));
         }
 
-        return options
-            .Where(o => o.DaysRecovered > 0)
+        else
+        {
+            Skip("crash_longest_critical_tasks", "no task of 5 days or more on the driving chain to add crews to.");
+        }
+
+        // Lever 4 — work longer weeks: full Saturdays on the project calendar, the recovery a site
+        // most often buys first.
+        var calendar = project.DefaultCalendar;
+        var saturday = calendar is null ? null : Writes.CalendarEdits.Describe(calendar, DayOfWeek.Saturday);
+        if (calendar is not null && saturday != "08:00-12:00,13:00-17:00")
+        {
+            var fullDay = new[] { (new TimeOnly(8, 0), new TimeOnly(12, 0)), (new TimeOnly(13, 0), new TimeOnly(17, 0)) };
+            options.Add(Simulate(
+                project, baseline.Value,
+                lever: "full_saturdays",
+                summary: string.IsNullOrEmpty(saturday)
+                    ? "Work Saturdays, 08:00-17:00, on the project calendar."
+                    : $"Work full Saturdays, 08:00-17:00, instead of {saturday}.",
+                uids: Array.Empty<int>(),
+                howToApply: "calendars_write op='set_week' days='sat' hours='08:00-12:00,13:00-17:00' on the "
+                            + "project calendar (or a task calendar on the critical tasks only).",
+                risks: new[]
+                {
+                    "Overtime cost, and fatigue if kept up for weeks. Check the resource calendars: a crew "
+                    + "whose own calendar keeps Saturday off does not follow.",
+                },
+                mutate: clone =>
+                {
+                    if (clone.DefaultCalendar is { } c)
+                    {
+                        Writes.CalendarEdits.SetWeek(c, new[] { DayOfWeek.Saturday }, fullDay);
+                    }
+                }));
+        }
+        else
+        {
+            Skip("full_saturdays", "the project calendar already works full Saturdays.");
+        }
+
+        foreach (var option in options.Where(o => o.DaysRecovered <= 0))
+        {
+            Skip(option.Lever, "evaluated, but the finish did not move — another chain drives it, or the "
+                               + "change is absorbed by constraints or resource calendars.");
+        }
+
+        var useful = options.Where(o => o.DaysRecovered > 0).ToList();
+
+        // Levers add up only partly — shortening a task that has also been overlapped recovers less
+        // twice — so the combination is measured, not summed.
+        if (useful.Count >= 2)
+        {
+            var chosen = useful.Select(o => o.Mutate).OfType<Action<ProjectFile>>().ToList();
+            useful.Add(Simulate(
+                project, baseline.Value,
+                lever: "combined",
+                summary: "All of the above together: " + string.Join(", ", useful.Select(o => o.Lever)) + ".",
+                uids: useful.SelectMany(o => o.Uids).Distinct().ToList(),
+                howToApply: "Apply each of the options above.",
+                risks: useful.SelectMany(o => o.Risks).Distinct().ToList(),
+                mutate: clone =>
+                {
+                    foreach (var mutate in chosen)
+                    {
+                        mutate(clone);
+                    }
+                }));
+        }
+
+        if (useful.Count == 0)
+        {
+            notes.Add("No lever moved the finish. See the reason given for each above.");
+        }
+
+        return useful
             .OrderByDescending(o => o.DaysRecovered)
             .Take(Math.Max(maxOptions, 1))
             .ToList();
@@ -426,6 +535,7 @@ public static class RecoveryPlanner
                 .Count(t => (MpxjMapper.Days(t.TotalSlack) ?? 0) < -0.001),
             HowToApply = howToApply,
             Risks = risks,
+            Mutate = mutate,
         };
     }
 }

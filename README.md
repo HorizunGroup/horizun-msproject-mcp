@@ -67,7 +67,7 @@ licensed Microsoft Project install, or a paid JDBC driver — and on the machine
 
 ---
 
-## The 26 tools
+## The 27 tools
 
 **Session** — `project_health` · `project_open` · `project_save`
 
@@ -92,16 +92,24 @@ neither, which is most of them. The report says which.
 **Writing** — `tasks_write` · `links_write` · `resources_write` · `calendars_write` · `schedule_update`
 
 Batched, typed, verified. Cycles are refused before they are applied, with the offending chain named.
-Two things this backend cannot do are not offered: reordering a task within the outline, and editing
-a calendar's weekly working-hours pattern. Asking for either gets a refusal that names it and says
-where to do it instead — an operation that half-works is worse than one that is absent.
+Calendars are edited in full: the working week and its hours (half or full Saturdays, shifts),
+working and non-working exceptions with their hours, the project calendar, and task and resource
+calendars. Tasks take their type, effort-driven flag, fixed cost, a baseline cost that leaves the
+baseline dates alone, and a whole outline in one batch; resources take rates, overtime rates,
+material units and max units Project actually sees. `schedule_update` op `level_resources` levels
+with Microsoft Project's own leveller, optionally within slack only. One thing is not offered:
+moving a task to another position in the outline. Asking for it gets a refusal that names it — an
+operation that half-works is worse than one that is absent.
 
-**Planning** — `schedule_recovery` · `schedule_target` · `schedule_sequence` · `schedule_learn` · `schedule_generate`
+**Planning** — `schedule_recovery` · `schedule_scenarios` · `schedule_target` · `schedule_sequence` · `schedule_learn` · `schedule_generate`
 
 Reprogramming, measured rather than asserted. `schedule_recovery` finds what is late, ranks it by
 how much of the schedule sits behind it, then tries each recovery lever — removing lag on the
-driving chain, overlapping hand-offs, compressing the longest critical tasks — on a throwaway copy
-and reports the finish date each one genuinely produces. `schedule_target` tests a date you have
+driving chain, overlapping hand-offs once half the predecessor is done, compressing the longest
+critical tasks, working full Saturdays, and all of them together — on a throwaway copy and reports
+the finish date each one genuinely produces, and why any lever was dropped. `schedule_scenarios`
+compares alternatives you define — calendar, resource, task and logic changes together — side by
+side: finish, cost, overallocation, critical tasks, nothing committed. `schedule_target` tests a date you have
 been handed and names the work the network does not hold in place. `schedule_sequence` recovers the
 logic a schedule is missing by reading the order its own dates already state — the planner laid the
 work out correctly and never linked it, and that decision is recoverable. `schedule_learn` mines finished
@@ -151,7 +159,7 @@ plan before they write.
 
 ### What it costs to have loaded
 
-The 26 tools present about **10,400 tokens** of schema, in every prompt, for as long as the server is
+The 27 tools present about **13,500 tokens** of schema, in every prompt, for as long as the server is
 connected. That is the honest price of the surface and it is worth knowing before choosing to carry
 it. It is also why the surface stays near 25: the largest alternative ships 79 tools, and past a
 point an agent cannot hold the surface in its head well enough to choose correctly within it.
@@ -294,10 +302,12 @@ python tools/planning-test.py     # 52 checks, reprogramming and learning
 python tools/robustness-test.py   # 34 checks, concurrency and hostile input
 python tools/smoke-test.py        # 15 checks, environment and capabilities
 python tools/packaging-test.py    # 33 checks, the metadata every client reads
+python tools/imported-file-test.py   # 16 checks, building on a file Project saved
+python tools/planner-features-test.py  # 32 checks, calendars, costs, outline, scenarios, read-only safety
 python tools/project-engine-test.py  # 20 checks, Microsoft Project as the engine (needs Project)
 ```
 
-**264 checks**, driven over real JSON-RPC against the running server, on Windows and on
+**312 checks**, driven over real JSON-RPC against the running server, on Windows and on
 Linux. With Microsoft Project installed the suites run with Project calculating the dates, and
 `project-engine-test.py` compares the server against Project doing the same thing by hand — dates,
 progress and summaries, task by task — and checks that a Project you have open is left exactly as it
@@ -355,7 +365,7 @@ src/HorizunMsProjectMcp/
   Analysis/      critical-path engine, working calendar, DCMA-14, earned value
   Writes/        the verified-write engine
   Bim/           element matching and the 4D bridge
-  Tools/         the 25 MCP tools
+  Tools/         the 27 MCP tools
 tools/
   acceptance-test.py   end-to-end across all tools, 65 checks
   scheduler-test.py    engine correctness, format round trips, safety guards, 45 checks
@@ -363,6 +373,8 @@ tools/
   robustness-test.py   concurrency, malformed input, resource limits, 34 checks
   smoke-test.py        environment and capability matrix, 15 checks
   packaging-test.py    versions, identifiers and client manifests agree, 33 checks
+  imported-file-test.py   a schedule Microsoft Project saved: ids, outline, custom fields, capacity, 16 checks
+  planner-features-test.py  calendars, costs, outline, scenarios, S-curve, read-only safety, 32 checks
   project-engine-test.py  Microsoft Project as the engine, against Project by hand, 20 checks
 ```
 

@@ -19,6 +19,10 @@ public sealed class PendingOp
     /// A batch made only of these needs no second pass — which, through Microsoft Project, would
     /// double the time for nothing.</summary>
     public bool SchedulesItself { get; init; }
+
+    /// <summary>Undoes what the operation added when its checks fail, so a rejected create does not
+    /// leave a half-made object in the model — one that later breaks every save and export.</summary>
+    public Action? Rollback { get; set; }
 }
 
 /// <summary>State captured before a write, so the impact can be measured rather than predicted.</summary>
@@ -141,6 +145,7 @@ public static class WriteEngine
             else
             {
                 rejected.AddRange(opFailures);
+                op.Rollback?.Invoke();
             }
         }
 

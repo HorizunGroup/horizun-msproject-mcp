@@ -157,7 +157,7 @@ public static class ProjectAutomation
         // PowerShell), killing the whole server with no error returned. Asking the running-object
         // table for it, as every other COM client does, is the path that works.
         var app = (before.Count > 0 ? ActiveInstance() : null)
-                  ?? Activator.CreateInstance(type)
+                  ?? Start(type)
                   ?? throw new McpToolException("Microsoft Project did not start.");
         var started = RunningPids().Except(before).ToList();
         var owner = before.Count == 0;
@@ -182,6 +182,39 @@ public static class ProjectAutomation
             catch
             {
                 // Best effort.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Starts Project for automation. After a Project that was killed rather than closed, COM can
+    /// refuse the first start with CO_E_SERVER_EXEC_FAILURE (0x80080005) while the dead instance is
+    /// still being cleaned up; one more try a few seconds later is what a person would do too.
+    /// </summary>
+    private static object? Start(Type type)
+    {
+        const int ServerExecFailure = unchecked((int)0x80080005);
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return Activator.CreateInstance(type);
+            }
+            catch (COMException ex) when (ex.HResult == ServerExecFailure && attempt < 3)
+            {
+                Thread.Sleep(TimeSpan.FromSeconds(3 * attempt));
+                if (RunningPids().Count > 0 && ActiveInstance() is { } running)
+                {
+                    return running;
+                }
+            }
+            catch (COMException ex) when (ex.HResult == ServerExecFailure)
+            {
+                throw new McpToolException(
+                    "Microsoft Project refused to start for automation (0x80080005, server execution failed). "
+                    + "This usually follows a Project that was closed by force, or one waiting on a dialog "
+                    + "(document recovery, first-run setup). Open Project yourself once, answer any dialog, "
+                    + "close it normally, and try again; project_health with deep=true checks it.");
             }
         }
     }
@@ -279,7 +312,22 @@ public sealed class ProjectHost
             throw new ArgumentException("The token must be part of the file name.", nameof(token));
         }
 
-        Call(_app, "FileOpenEx", Path.GetFullPath(path), true);
+        try
+        {
+            Call(_app, "FileOpenEx", Path.GetFullPath(path), true);
+        }
+        catch (McpToolException ex) when (!_owner)
+        {
+            // A guest in the user's Project: on its start screen, or behind a dialog, Project hands
+            // out an application with no document and refuses to open one.
+            var documents = TryGet(_app, "Projects") is { } projects ? TryGet(projects, "Count") : null;
+            throw new McpToolException(
+                "Microsoft Project is open but would not open the working copy"
+                + (Convert.ToInt32(documents ?? 0) == 0 ? " — it is probably on its start screen or showing a dialog" : "")
+                + ". Open or create any project in it (or close it), answer any dialog, and try again. "
+                + $"({ex.Message})");
+        }
+
         _opened[token] = FindByName(token) ?? throw new McpToolException(
             "Microsoft Project opened the working copy but it could not be found among its documents.");
         Activate(token);
@@ -290,6 +338,24 @@ public sealed class ProjectHost
     public void Calculate(string token)
     {
         Activate(token);
+        Call(_app, "CalculateProject");
+    }
+
+    /// <summary>
+    /// Levels our document with Microsoft Project's own leveller — the only honest way to level, since
+    /// the heuristic is Project's and unpublished. Options are named rather than positional: the
+    /// argument list of LevelingOptions differs between versions, and a shifted position silently sets
+    /// the wrong option.
+    /// </summary>
+    /// <param name="withinSlack">Delay tasks only within their free slack, so the finish cannot move
+    /// (Project's "Level only within available slack").</param>
+    public void Level(string token, bool withinSlack, bool canSplit)
+    {
+        Activate(token);
+        CallNamed(_app, "LevelingOptions",
+            ("Automatic", false), ("DelayInSlack", withinSlack), ("AutoClearLeveling", true),
+            ("LevelEntireProject", true), ("LevelingCanSplit", canSplit));
+        CallNamed(_app, "LevelNow", ("All", true));
         Call(_app, "CalculateProject");
     }
 
@@ -574,6 +640,20 @@ public sealed class ProjectHost
         catch
         {
             // Conveniences; a version that does not expose them is not a failure.
+        }
+    }
+
+    private static object? CallNamed(object target, string method, params (string Name, object Value)[] args)
+    {
+        try
+        {
+            return target.GetType().InvokeMember(method, BindingFlags.InvokeMethod, null, target,
+                args.Select(a => a.Value).ToArray(), null, null, args.Select(a => a.Name).ToArray());
+        }
+        catch (Exception ex)
+        {
+            var root = ProjectAutomation.Describe(ex);
+            throw new McpToolException($"Microsoft Project failed in {method}: {root.Message}");
         }
     }
 

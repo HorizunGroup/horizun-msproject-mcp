@@ -341,9 +341,9 @@ def main() -> int:
 
         hours = c.call("calendars_write", handle=h, ops=[
             {"op": "set_working_hours", "name": "Standard"}])
-        check("so does the working-hours pattern nobody can edit here",
+        check("a working-hours change that does not say which days refuses, and says what it needs",
               hours.get("applied") == 0
-              and any("not editable" in r["reason"] for r in hours.get("rejected", [])),
+              and any("days" in r["reason"] for r in hours.get("rejected", [])),
               json.dumps(hours.get("rejected"))[:120])
 
     finally:

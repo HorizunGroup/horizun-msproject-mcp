@@ -39,10 +39,12 @@ public static class ProjectHandoff
             .Select(a => a.UniqueID!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))
             .ToHashSet();
 
+        Writes.Structure.Normalize(project);
         new MSPDIWriter { WriteTimephasedData = true }.Write(project, path);
 
         var document = XDocument.Load(path);
         var root = document.Root ?? throw new McpToolException("The MSPDI export came back empty.");
+        AnchorUnassignedResource(root);
 
         var tasks = root.Element(Ns + "Tasks")?.Elements(Ns + "Task")
                         .Where(t => Text(t, "UID") is not null)
@@ -115,6 +117,74 @@ public static class ProjectHandoff
         }
 
         document.Save(path);
+    }
+
+    /// <summary>
+    /// Project lays the work of a placeholder assignment on the unassigned resource's calendar, not the
+    /// task's. In a file begun on a Spanish install that calendar derives from the locale's "Estándar"
+    /// (9:00-13:00, 15:00-19:00) whatever the project calendar is, and where the file has no unassigned
+    /// resource at all — a schedule begun here — Project makes one from that same template. Either way
+    /// new work moved to hours the project does not keep. Derived from the project calendar, it keeps
+    /// them, as the project calendar does for every task with no calendar of its own.
+    /// </summary>
+    private static void AnchorUnassignedResource(XElement root)
+    {
+        var projectCalendar = Text(root, "CalendarUID");
+        var calendars = root.Element(Ns + "Calendars");
+        if (projectCalendar is null || calendars is null)
+        {
+            return;
+        }
+
+        var resources = root.Element(Ns + "Resources");
+        if (resources is null)
+        {
+            resources = new XElement(Ns + "Resources");
+            var after = root.Element(Ns + "Tasks") ?? calendars;
+            after.AddAfterSelf(resources);
+        }
+
+        var unassigned = resources.Elements(Ns + "Resource").FirstOrDefault(r => Text(r, "UID") == "0");
+        var calendar = unassigned is null
+            ? null
+            : calendars.Elements(Ns + "Calendar").FirstOrDefault(c => Text(c, "UID") == Text(unassigned, "CalendarUID"));
+
+        if (calendar is not null)
+        {
+            // Only a calendar that is nothing but its base: one with hours or exceptions of its own
+            // was made so on purpose.
+            var ownTime = calendar.Element(Ns + "WeekDays")?.HasElements == true
+                          || calendar.Element(Ns + "Exceptions")?.HasElements == true
+                          || calendar.Element(Ns + "WorkWeeks")?.HasElements == true;
+            if (!ownTime && Text(calendar, "IsBaseCalendar") != "1" && Text(calendar, "BaseCalendarUID") != projectCalendar)
+            {
+                calendar.SetElementValue(Ns + "BaseCalendarUID", projectCalendar);
+            }
+
+            return;
+        }
+
+        var uid = calendars.Elements(Ns + "Calendar")
+            .Select(c => int.TryParse(Text(c, "UID"), out var n) ? n : 0)
+            .DefaultIfEmpty(0).Max() + 1;
+        calendars.Add(new XElement(Ns + "Calendar",
+            new XElement(Ns + "UID", uid),
+            new XElement(Ns + "IsBaseCalendar", 0),
+            new XElement(Ns + "BaseCalendarUID", projectCalendar)));
+
+        if (unassigned is null)
+        {
+            resources.AddFirst(new XElement(Ns + "Resource",
+                new XElement(Ns + "UID", 0),
+                new XElement(Ns + "ID", 0),
+                new XElement(Ns + "Type", 1),
+                new XElement(Ns + "IsNull", 0),
+                new XElement(Ns + "CalendarUID", uid)));
+        }
+        else
+        {
+            unassigned.SetElementValue(Ns + "CalendarUID", uid);
+        }
     }
 
     /// <summary>

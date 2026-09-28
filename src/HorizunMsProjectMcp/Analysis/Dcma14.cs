@@ -36,7 +36,8 @@ public static class Dcma14
         ProjectFile project,
         DateTime statusDate,
         bool canRecalculate,
-        string? budgetCodeField = null)
+        string? budgetCodeField = null,
+        IReadOnlyCollection<int>? justifiedLags = null)
     {
         var leaves = ScheduleAnalyzer.Leaves(project).ToList();
         var findings = new List<Finding>();
@@ -68,15 +69,25 @@ public static class Dcma14
             danglers.Count, total, 5,
             danglers, "Link the task into the network, or mark it as a genuine start/finish milestone."));
 
+        // A lag or lead the planner has justified — curing, a fast-track the client asked for — is a
+        // decision, not a defect. Those successors are left out of checks 2 and 3, and listed.
+        var justified = justifiedLags is null ? new HashSet<int>() : justifiedLags.ToHashSet();
+        var judged = leaves.Where(t => !justified.Contains(t.UniqueID ?? -1)).ToList();
+        if (justified.Count > 0)
+        {
+            reportNotes.Add($"Lags and leads into {justified.Count} task(s) marked justified were not counted in "
+                            + $"checks 2 and 3: uids {string.Join(", ", justified.Order())}.");
+        }
+
         // ---- 2. Leads: negative lag is never acceptable ----
-        var leads = RelationsWhere(leaves, r => (MpxjMapper.Days(r.Lag) ?? 0) < -0.001);
+        var leads = RelationsWhere(judged, r => (MpxjMapper.Days(r.Lag) ?? 0) < -0.001);
         findings.Add(Ratio(
             "dcma_02_leads", "Negative lag (leads)",
             leads.Count, total, 0,
             leads, "Replace the lead with a proper SS/FF relationship, or break the task down."));
 
         // ---- 3. Lags ----
-        var lags = RelationsWhere(leaves, r => (MpxjMapper.Days(r.Lag) ?? 0) > 0.001);
+        var lags = RelationsWhere(judged, r => (MpxjMapper.Days(r.Lag) ?? 0) > 0.001);
         findings.Add(Ratio(
             "dcma_03_lags", "Positive lags",
             lags.Count, total, 5,
@@ -130,10 +141,15 @@ public static class Dcma14
             longTasks, "Break long tasks down so progress can actually be measured."));
 
         // ---- 9. Invalid dates ----
+        // A status date given as a day, with no time, means the whole of that day: work reported at
+        // 10:00 on it is not in the future, and a forecast finishing that afternoon is not in the past.
+        var dayOnly = statusDate.TimeOfDay == TimeSpan.Zero;
+        var actualsUpTo = dayOnly ? statusDate.Date.AddDays(1).AddTicks(-1) : statusDate;
+        var forecastsFrom = dayOnly ? statusDate.Date : statusDate;
         var invalid = leaves.Where(t =>
-            (t.ActualStart is not null && t.ActualStart > statusDate) ||
-            (t.ActualFinish is not null && t.ActualFinish > statusDate) ||
-            (t.ActualFinish is null && t.Finish is not null && t.Finish < statusDate && (t.PercentageComplete ?? 0) < 100))
+            (t.ActualStart is not null && t.ActualStart > actualsUpTo) ||
+            (t.ActualFinish is not null && t.ActualFinish > actualsUpTo) ||
+            (t.ActualFinish is null && t.Finish is not null && t.Finish < forecastsFrom && (t.PercentageComplete ?? 0) < 100))
             .ToList();
         findings.Add(historical
             ? NotEvaluated(
@@ -144,6 +160,18 @@ public static class Dcma14
                 "dcma_09_invalid_dates", "Invalid dates (actuals in the future, or forecasts in the past)",
                 invalid.Count, total, 0,
                 invalid, $"Update progress against the status date ({statusDate:yyyy-MM-dd}) and reschedule incomplete work."));
+
+        // A task with an actual finish is done; below 100% it is not, and Project goes on scheduling
+        // the rest of its work — assigning a material to finished work does it — past the status
+        // date, and moves everything after it.
+        var finishedIncomplete = leaves
+            .Where(t => t.ActualFinish is not null && (t.PercentageComplete ?? 0) < 100)
+            .ToList();
+        findings.Add(Ratio(
+            "hrz_finished_incomplete", "Tasks with an actual finish but under 100% complete",
+            finishedIncomplete.Count, total, 0,
+            finishedIncomplete, "Set them to 100%: remaining work on a finished task (often a resource or "
+                                + "material assigned after it finished) is rescheduled past the status date."));
 
         // ---- 10. Resources ----
         var assignedUids = project.ResourceAssignments

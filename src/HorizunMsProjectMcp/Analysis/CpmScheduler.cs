@@ -113,7 +113,7 @@ public static class CpmScheduler
                     continue;
                 }
 
-                var lag = MpxjMapper.Days(relation.Lag, cal.HoursPerDay) ?? 0;
+                var lag = LagDays(relation, cal.HoursPerDay, pred.DurationDays);
                 var candidate = relation.Type switch
                 {
                     RelationType.StartStart => pred.EarlyStart,
@@ -178,7 +178,7 @@ public static class CpmScheduler
                     continue;
                 }
 
-                var lag = MpxjMapper.Days(relation.Lag, cal.HoursPerDay) ?? 0;
+                var lag = LagDays(relation, cal.HoursPerDay, node.DurationDays);
                 var candidate = relation.Type switch
                 {
                     RelationType.StartStart => cal.AddWorkingDays(
@@ -403,4 +403,10 @@ public static class CpmScheduler
 
         return order;
     }
+
+    /// <summary>A lag in days; one given as a percentage is that share of the predecessor.</summary>
+    private static double LagDays(Relation relation, double hoursPerDay, double predecessorDays) =>
+        relation.Lag is { Units: TimeUnit.Percent or TimeUnit.ElapsedPercent } percent
+            ? percent.DurationValue / 100.0 * predecessorDays
+            : MpxjMapper.Days(relation.Lag, hoursPerDay) ?? 0;
 }

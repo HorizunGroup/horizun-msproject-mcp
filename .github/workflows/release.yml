@@ -62,6 +62,8 @@ jobs:
           python tools/packaging-test.py
           python tools/export-fidelity-test.py
           python tools/pmo-test.py
+          python tools/imported-file-test.py
+          python tools/planner-features-test.py
           python tools/project-engine-test.py
 
       - name: Pack

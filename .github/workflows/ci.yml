@@ -66,6 +66,12 @@ jobs:
       - name: Project control (risk, status, change control, WBS, S-curve)
         run: python tools/pmo-test.py
 
+      - name: Building on a schedule Microsoft Project saved
+        run: python tools/imported-file-test.py
+
+      - name: Calendars, costs, outline, scenarios and read-only safety
+        run: python tools/planner-features-test.py
+
       # Hosted runners have no Microsoft Project, so this reports itself skipped here. It is run
       # locally, on a machine with Project, before every release (see CONTRIBUTING.md).
       - name: Microsoft Project as the scheduling engine
@@ -136,3 +142,9 @@ jobs:
 
       - name: Project control (risk, status, change control, WBS, S-curve)
         run: python tools/pmo-test.py
+
+      - name: Building on a schedule Microsoft Project saved
+        run: python tools/imported-file-test.py
+
+      - name: Calendars, costs, outline, scenarios and read-only safety
+        run: python tools/planner-features-test.py

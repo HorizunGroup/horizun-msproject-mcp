@@ -61,6 +61,14 @@ public sealed record ResourceDto
     public string? Type { get; init; }
     public double? MaxUnits { get; init; }
     public double? StandardRate { get; init; }
+    public double? OvertimeRate { get; init; }
+
+    /// <summary>A material resource's unit (m3, kg); its assignments' units are quantities in it.</summary>
+    public string? MaterialLabel { get; init; }
+
+    /// <summary>The base calendar the resource works on.</summary>
+    public string? Calendar { get; init; }
+
     public double? CostTotal { get; init; }
     public double? WorkHours { get; init; }
     public bool Overallocated { get; init; }

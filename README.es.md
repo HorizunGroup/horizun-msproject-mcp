@@ -60,7 +60,7 @@ aquí no existen en ningún otro:
 
 ---
 
-## Las 26 herramientas
+## Las 27 herramientas
 
 **Sesión** — `project_health` · `project_open` · `project_save`
 
@@ -86,16 +86,24 @@ ninguno de los dos, que es la mayoría. El reporte dice cuál usó.
 **Escritura** — `tasks_write` · `links_write` · `resources_write` · `calendars_write` · `schedule_update`
 
 Por lotes, tipadas, verificadas. Los ciclos se rechazan antes de aplicarse, nombrando la cadena
-culpable. Dos cosas que este backend no puede hacer no se ofrecen: reordenar una tarea dentro del
-esquema, y editar el patrón semanal de horas de un calendario. Pedir cualquiera de las dos obtiene
-un rechazo que la nombra y dice dónde hacerlo — una operación a medias es peor que una ausente.
+culpable. Los calendarios se editan por completo: la semana laboral y sus horas (sábado medio o
+completo, turnos), excepciones laborables y no laborables con su horario, el calendario del proyecto
+y los de tareas y recursos. Las tareas aceptan tipo, condicionada por el esfuerzo, costo fijo, un
+costo de línea base que no toca sus fechas, y un esquema entero en un solo lote; los recursos, tarifas,
+tarifa de horas extra, unidad de material y unidades máximas que Project de verdad ve.
+`schedule_update` op `level_resources` nivela con el nivelador de Microsoft Project, opcionalmente solo
+dentro de la holgura. Una cosa no se ofrece: mover una tarea a otra posición del esquema. Pedirla
+obtiene un rechazo que la nombra — una operación a medias es peor que una ausente.
 
-**Planeación** — `schedule_recovery` · `schedule_target` · `schedule_sequence` · `schedule_learn` · `schedule_generate`
+**Planeación** — `schedule_recovery` · `schedule_scenarios` · `schedule_target` · `schedule_sequence` · `schedule_learn` · `schedule_generate`
 
 Reprogramación medida, no afirmada. `schedule_recovery` encuentra lo atrasado, lo ordena por cuánto
 cronograma cuelga detrás, y prueba cada palanca — quitar retrasos en la cadena conductora, traslapar
-entregas, comprimir las críticas más largas — sobre una copia desechable, y reporta la fecha de fin
-que cada una produce de verdad. `schedule_target` pone a prueba una fecha que te entregaron y nombra
+entregas cuando va la mitad de la predecesora, comprimir las críticas más largas, trabajar sábados
+completos, y todas juntas — sobre una copia desechable, y reporta la fecha de fin que cada una produce
+de verdad, y por qué descartó cada palanca. `schedule_scenarios` compara lado a lado alternativas que
+defines tú — cambios de calendario, recursos, tareas y lógica juntos —: fin, costo, sobreasignación,
+tareas críticas, sin confirmar nada. `schedule_target` pone a prueba una fecha que te entregaron y nombra
 el trabajo que la red no sostiene. `schedule_sequence` recupera la lógica que falta leyendo el orden
 que las propias fechas ya declaran. `schedule_learn` extrae de cronogramas terminados cuánto toma de
 verdad cada actividad y qué suele ir antes; `schedule_generate` lo convierte en un primer borrador,
@@ -145,7 +153,7 @@ importaciones planean antes de escribir.
 
 ### Lo que cuesta tenerlo cargado
 
-Las 26 herramientas presentan unos **10.400 tokens** de esquema, en cada prompt, mientras el servidor
+Las 27 herramientas presentan unos **13.500 tokens** de esquema, en cada prompt, mientras el servidor
 esté conectado. Ese es el precio honesto de la superficie y conviene saberlo antes de decidir
 cargarla. Es también la razón de que se mantenga cerca de 25: la alternativa más grande trae 79
 herramientas, y pasado cierto punto un agente no sostiene su propia superficie en la cabeza lo
@@ -252,10 +260,12 @@ python tools/planning-test.py     # 52 chequeos, reprogramación y aprendizaje
 python tools/robustness-test.py   # 34 chequeos, concurrencia y entrada hostil
 python tools/smoke-test.py        # 15 chequeos, entorno y capacidades
 python tools/packaging-test.py    # 33 chequeos, la metadata que lee cada cliente
+python tools/imported-file-test.py   # 16 chequeos, construir sobre un archivo guardado por Project
+python tools/planner-features-test.py  # 32 chequeos, calendarios, costos, esquema, escenarios, solo lectura
 python tools/project-engine-test.py  # 20 chequeos, Microsoft Project como motor (requiere Project)
 ```
 
-**264 chequeos**, ejecutados sobre JSON-RPC real contra el servidor corriendo, en Windows y en
+**312 chequeos**, ejecutados sobre JSON-RPC real contra el servidor corriendo, en Windows y en
 Linux. Con Microsoft Project instalado, las suites corren con Project calculando las fechas, y
 `project-engine-test.py` compara el servidor contra Project haciendo lo mismo a mano — fechas, avance
 y resúmenes, tarea por tarea — y verifica que un Project que tengas abierto quede exactamente como

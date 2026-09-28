@@ -14,7 +14,10 @@ namespace Horizun.ProjectMcp.Analysis;
 /// </remarks>
 public static class ProjectScheduler
 {
-    public static ScheduleRunReport Run(ProjectFile project)
+    public static ScheduleRunReport Run(ProjectFile project) => Run(project, leveling: null);
+
+    /// <summary>Calculates, and first levels resources with Project's leveller when asked.</summary>
+    public static ScheduleRunReport Run(ProjectFile project, (bool WithinSlack, bool CanSplit)? leveling)
     {
         var token = $"hzpm-{Guid.NewGuid():N}";
         var directory = Path.GetTempPath();
@@ -38,6 +41,11 @@ public static class ProjectScheduler
             {
                 host.Open(input, token);
                 host.Calculate(token);
+                if (leveling is { } options)
+                {
+                    host.Level(token, options.WithinSlack, options.CanSplit);
+                }
+
                 host.SaveXml(token, output);
                 host.Close(token);
                 return 0;
@@ -132,6 +140,8 @@ public static class ProjectScheduler
             target.TotalSlack = source.TotalSlack;
             target.FreeSlack = source.FreeSlack;
             target.Critical = source.Critical;
+            // What levelling added is Project's to keep: without it, reopening the file undoes it.
+            target.LevelingDelay = source.LevelingDelay;
 
             // Progress is deliberately not copied back. Project re-importing an in-progress task
             // from XML — its own export included — moves part of the work done into remaining (a

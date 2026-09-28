@@ -51,6 +51,92 @@ public static class ExportFidelity
             ? Convert.ToDouble(expected.ProjectProperties.MinutesPerDay) / 60.0
             : MpxjMapper.HoursPerDay;
 
+        // The outline and the resources are what a schedule is made of: a task one level too high
+        // empties its summary, and work booked to the wrong trade is a wrong plan however right
+        // its dates.
+        foreach (var want in expected.Tasks)
+        {
+            if (want.UniqueID is not int uid || uid == 0 || want.Null || actual.GetTaskByUniqueID(uid) is not { } got)
+            {
+                continue;
+            }
+
+            if (want.OutlineLevel is { } level && got.OutlineLevel != level)
+            {
+                Lost("outlineLevel", want, level, got.OutlineLevel);
+            }
+
+            if (!string.IsNullOrWhiteSpace(want.WBS) && want.WBS != got.WBS)
+            {
+                Lost("wbs", want, want.WBS, got.WBS);
+            }
+
+            if ((want.Calendar?.Name ?? "") != (got.Calendar?.Name ?? ""))
+            {
+                Lost("taskCalendar", want, want.Calendar?.Name, got.Calendar?.Name);
+            }
+
+            if (!SameAmount(want.FixedCost, got.FixedCost))
+            {
+                Lost("fixedCost", want, want.FixedCost, got.FixedCost);
+            }
+
+            if (!want.Summary && want.BaselineCost is > 0 && !SameAmount(want.BaselineCost, got.BaselineCost))
+            {
+                Lost("baselineCost", want, want.BaselineCost, got.BaselineCost);
+            }
+
+            var wantResources = ResourcesOf(want);
+            var gotResources = ResourcesOf(got);
+            if (wantResources != gotResources)
+            {
+                Lost("assignments", want, wantResources, gotResources);
+            }
+        }
+
+        if ((expected.DefaultCalendar?.Name ?? "") != (actual.DefaultCalendar?.Name ?? ""))
+        {
+            losses["projectCalendar"] = new List<string> { $"{expected.DefaultCalendar?.Name} -> {actual.DefaultCalendar?.Name}" };
+        }
+
+        // Resources: who they are, what they cost, how many there are, and when they work.
+        foreach (var want in expected.Resources.Where(r => r.UniqueID is not null and not 0 && !string.IsNullOrEmpty(r.Name)))
+        {
+            var got = actual.GetResourceByUniqueID(want.UniqueID!.Value);
+            void LostResource(string field, object? a, object? b)
+            {
+                if (!losses.TryGetValue(field, out var list))
+                {
+                    losses[field] = list = new List<string>();
+                }
+
+                list.Add($"resource {want.UniqueID} '{want.Name}': {Show(a)} -> {Show(b)}");
+            }
+
+            if (got is null || got.Name != want.Name)
+            {
+                LostResource("resource", want.Name, got?.Name ?? "missing");
+                continue;
+            }
+
+            if (Math.Abs(Analysis.ResourceAnalyzer.MaxUnits(want) - Analysis.ResourceAnalyzer.MaxUnits(got)) > 0.5)
+            {
+                LostResource("maxUnits", Analysis.ResourceAnalyzer.MaxUnits(want), Analysis.ResourceAnalyzer.MaxUnits(got));
+            }
+
+            if (!SameAmount(want.StandardRate?.Amount, got.StandardRate?.Amount))
+            {
+                LostResource("standardRate", want.StandardRate?.Amount, got.StandardRate?.Amount);
+            }
+
+            var wantBase = want.Calendar?.Parent?.Name ?? want.Calendar?.Name;
+            var gotBase = got.Calendar?.Parent?.Name ?? got.Calendar?.Name;
+            if (wantBase is not null && wantBase != gotBase)
+            {
+                LostResource("resourceCalendar", wantBase, gotBase);
+            }
+        }
+
         foreach (var want in expected.Tasks)
         {
             // Detail tasks only: a summary's progress and dates are Project's rollup of them, recomputed
@@ -141,7 +227,9 @@ public static class ExportFidelity
                 Field = kv.Key,
                 Tasks = kv.Value.Count,
                 Examples = kv.Value.Take(5).ToList(),
-                Critical = kv.Key is not ("duration" or "actualDuration" or "actualWork"),
+                // WBS codes Project may regenerate from the file's own code mask; the outline level
+                // is what the structure is.
+                Critical = kv.Key is not ("duration" or "actualDuration" or "actualWork" or "wbs"),
             })
             .OrderByDescending(l => l.Tasks)
             .ToList();
@@ -169,6 +257,15 @@ public static class ExportFidelity
     private static bool SameMoment(DateTime? want, DateTime? got) =>
         SameMinute(want, got)
         || want is { TimeOfDay.Ticks: 0 } w && got is { } g && (g.Date == w.Date || g.Date == w.Date.AddDays(-1) && g.Hour >= 12);
+
+    /// <summary>Who does the task, by name, and at what units — what the planner sees.</summary>
+    private static string ResourcesOf(MPXJ.Net.Task task) =>
+        string.Join(", ", task.ResourceAssignments
+            .Where(a => a.Resource is { UniqueID: not null and not 0 } r && !string.IsNullOrEmpty(r.Name))
+            .Select(a => $"{a.Resource!.Name}@{Math.Round(a.Units ?? 100)}%")
+            .OrderBy(x => x, StringComparer.Ordinal));
+
+    private static bool SameAmount(double? a, double? b) => Math.Abs((a ?? 0) - (b ?? 0)) < 0.01;
 
     private static bool SameMinute(DateTime? a, DateTime? b) =>
         a is null ? b is null : b is not null && Math.Abs((a.Value - b.Value).TotalMinutes) < 1;
