@@ -392,7 +392,7 @@ def main() -> int:
         check("an empty slot accepts it", spare.get("applied") == 1, json.dumps(spare)[:100])
 
         forced = client.call("schedule_update", handle=handle, op="save_baseline",
-                             baseline=0, overwriteBaseline=True)
+                             baseline=0, overwriteBaseline=True, reason="approved scope change")
         check("overwriting is possible when asked for explicitly",
               forced.get("applied") == 1, json.dumps(forced)[:100])
 
