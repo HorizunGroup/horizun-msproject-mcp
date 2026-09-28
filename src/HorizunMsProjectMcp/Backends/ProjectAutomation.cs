@@ -149,7 +149,16 @@ public static class ProjectAutomation
                        + "Run project_health with deep=true for the diagnosis and the repair steps.");
 
         var before = RunningPids();
-        var app = Activator.CreateInstance(type) ?? throw new McpToolException("Microsoft Project did not start.");
+
+        // With Project already running, take the instance it registered rather than asking COM for
+        // a new one. Project is single-instance, so the answer is the same object either way — but
+        // Activator.CreateInstance against a running Project was measured to crash the .NET runtime
+        // outright (Internal CLR error 0x80131506 in AllocateComObject, reproducible from bare
+        // PowerShell), killing the whole server with no error returned. Asking the running-object
+        // table for it, as every other COM client does, is the path that works.
+        var app = (before.Count > 0 ? ActiveInstance() : null)
+                  ?? Activator.CreateInstance(type)
+                  ?? throw new McpToolException("Microsoft Project did not start.");
         var started = RunningPids().Except(before).ToList();
         var owner = before.Count == 0;
         if (owner && started.Count == 1)
@@ -176,6 +185,28 @@ public static class ProjectAutomation
             }
         }
     }
+
+    private static object? ActiveInstance()
+    {
+        try
+        {
+            Marshal.ThrowExceptionForHR(CLSIDFromProgID(ProgId, out var clsid));
+            GetActiveObject(ref clsid, IntPtr.Zero, out var instance);
+            return instance;
+        }
+        catch
+        {
+            // Running but not yet registered (still starting): fall back to COM activation.
+            return null;
+        }
+    }
+
+    [DllImport("ole32.dll")]
+    private static extern int CLSIDFromProgID([MarshalAs(UnmanagedType.LPWStr)] string progId, out Guid clsid);
+
+    [DllImport("oleaut32.dll", PreserveSig = false)]
+    private static extern void GetActiveObject(
+        ref Guid clsid, IntPtr reserved, [MarshalAs(UnmanagedType.IUnknown)] out object instance);
 
     private static List<int> RunningPids() =>
         Process.GetProcessesByName(ProcessName).Select(p => p.Id).ToList();
@@ -323,22 +354,30 @@ public sealed class ProjectHost
                 continue;
             }
 
-            if (record.ActualStart is not null)
-            {
-                Set(task, "ActualStart", record.ActualStart.Value);
-            }
-
+            // Order matters, and was measured on a real schedule: actual start then actual finish, and
+            // Project moves the start back to the scheduled one; finish first, then start, keeps both.
             if (record.ActualFinish is not null)
             {
                 Set(task, "ActualFinish", record.ActualFinish.Value);
-            }
-            else if (record.ActualDurationMinutes is > 0)
-            {
-                Set(task, "ActualDuration", record.ActualDurationMinutes.Value);
+                if (record.ActualStart is not null)
+                {
+                    Set(task, "ActualStart", record.ActualStart.Value);
+                }
             }
             else
             {
-                Set(task, "PercentComplete", (int)Math.Round(record.Percent));
+                // In progress: percent, then start, then percent again. Measured on a real schedule,
+                // Project ignores an actual start on a task still at 0% and, given the percent after,
+                // takes the scheduled start as the actual one; given the start after the percent, it
+                // keeps the work done and re-derives the percent (30% became 27%). Setting the percent
+                // once more, now against the right start, is what leaves both as recorded.
+                var percent = (int)Math.Round(record.Percent);
+                Set(task, "PercentComplete", percent);
+                if (record.ActualStart is not null)
+                {
+                    Set(task, "ActualStart", record.ActualStart.Value);
+                    Set(task, "PercentComplete", percent);
+                }
             }
         }
     }
@@ -555,4 +594,5 @@ public sealed class ProjectHost
 
 /// <summary>Progress to restore on one task: what a planner would type into Project.</summary>
 public sealed record ProgressRecord(
-    int Uid, DateTime? ActualStart, DateTime? ActualFinish, double Percent, double? ActualDurationMinutes);
+    int Uid, DateTime? ActualStart, DateTime? ActualFinish, double Percent, double? ActualDurationMinutes,
+    double? RemainingDurationMinutes = null);

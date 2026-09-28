@@ -35,7 +35,8 @@ public static class ComBridge
                 t.ActualStart ?? ((t.PercentageComplete ?? 0) > 0 ? t.Start : null),
                 t.ActualFinish ?? ((t.PercentageComplete ?? 0) >= 100 ? t.Finish : null),
                 Convert.ToDouble(t.PercentageComplete ?? 0),
-                MinutesOf(project, t.ActualDuration)))
+                MinutesOf(project, t.ActualDuration),
+                t.RemainingDuration is null ? null : MinutesOf(project, t.RemainingDuration) ?? 0))
             .ToList();
 
         try
@@ -65,18 +66,26 @@ public static class ComBridge
 
         var written = MpxjBackend.Read(candidate);
         var losses = ExportFidelity.Compare(project, written);
-        if (losses.Count > 0)
+        var critical = losses.Where(l => l.Critical).ToList();
+        if (critical.Count > 0)
         {
             var kept = Path.ChangeExtension(targetMppPath, ".unverified.mpp");
             File.Move(candidate, kept, overwrite: true);
             throw new McpToolException(
                 $"The .mpp did not keep the schedule, so '{targetMppPath}' was NOT written. Read back, it "
-                + $"differs: {ExportFidelity.Describe(losses)} The file Project produced is at '{kept}' "
+                + $"differs: {ExportFidelity.Describe(critical)} The file Project produced is at '{kept}' "
                 + "for inspection. The schedule itself is untouched; MSPDI (format='mspdi') keeps all of it.");
         }
 
         File.Move(candidate, targetMppPath, overwrite: true);
-        return $"Verified by reading the .mpp back: {ExportFidelity.Census(project)} — all preserved.";
+        var verified = $"Verified by reading the .mpp back: {ExportFidelity.Census(written)}; progress, actual "
+                       + "dates, baseline and status date all preserved.";
+        var derived = losses.Where(l => !l.Critical).ToList();
+        return derived.Count == 0
+            ? verified
+            : verified + " WARNING — Microsoft Project re-derived figures the source states inconsistently "
+              + "with its own dates, and kept the dates: " + ExportFidelity.Describe(derived)
+              + " Check those tasks' durations in the source if they matter.";
     }
 
     private static double? MinutesOf(MPXJ.Net.ProjectFile project, MPXJ.Net.Duration? duration)

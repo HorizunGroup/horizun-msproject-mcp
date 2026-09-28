@@ -8,6 +8,11 @@ public sealed record FidelityLoss
     public required string Field { get; init; }
     public required int Tasks { get; init; }
     public IReadOnlyList<string> Examples { get; init; } = Array.Empty<string>();
+
+    /// <summary>True for what defines a schedule's state — progress, actual dates, baseline, status
+    /// date, the task itself. False for figures Project derives from those (durations, actual
+    /// duration and work), which it recomputes wherever a source's own figures disagree.</summary>
+    public bool Critical { get; init; } = true;
 }
 
 /// <summary>
@@ -48,7 +53,10 @@ public static class ExportFidelity
 
         foreach (var want in expected.Tasks)
         {
-            if (want.UniqueID is not int uid || uid == 0 || want.Null || string.IsNullOrWhiteSpace(want.Name) && want.Start is null)
+            // Detail tasks only: a summary's progress and dates are Project's rollup of them, recomputed
+            // on save, and are right exactly when the tasks beneath are.
+            if (want.UniqueID is not int uid || uid == 0 || want.Null || want.Summary
+                || string.IsNullOrWhiteSpace(want.Name) && want.Start is null)
             {
                 continue;
             }
@@ -69,19 +77,32 @@ public static class ExportFidelity
                 Lost("percentComplete", want, want.PercentageComplete ?? 0, got.PercentageComplete ?? 0);
             }
 
-            if (!SameMinute(want.ActualStart, got.ActualStart))
+            if (!SameMoment(want.ActualStart, got.ActualStart))
             {
                 Lost("actualStart", want, want.ActualStart, got.ActualStart);
             }
 
-            if (!SameMinute(want.ActualFinish, got.ActualFinish))
+            if (!SameMoment(want.ActualFinish, got.ActualFinish))
             {
                 Lost("actualFinish", want, want.ActualFinish, got.ActualFinish);
             }
 
+            // A finished task's actual duration is derived from its actual dates, which are checked
+            // above; where a source's stated duration disagrees with its own dates, Project keeps the
+            // dates. For work in progress it is percent of duration, allowed the rounding of a whole
+            // percent.
+            var wantDuration = MpxjMapper.Hours(want.Duration, hours) ?? 0;
+            var gotDuration = MpxjMapper.Hours(got.Duration, hours) ?? 0;
+            if (Math.Abs(wantDuration - gotDuration) > 0.1)
+            {
+                Lost("duration", want, $"{wantDuration:0.##}h", $"{gotDuration:0.##}h");
+            }
+
             var wantActual = MpxjMapper.Hours(want.ActualDuration, hours) ?? 0;
             var gotActual = MpxjMapper.Hours(got.ActualDuration, hours) ?? 0;
-            if (wantActual > 0 && Math.Abs(wantActual - gotActual) > 0.1)
+            var finished = (want.PercentageComplete ?? 0) >= 100;
+            var slack = Math.Max(0.1, (MpxjMapper.Hours(want.Duration, hours) ?? 0) * 0.02);
+            if (!finished && wantActual > 0 && Math.Abs(wantActual - gotActual) > slack)
             {
                 Lost("actualDuration", want, $"{wantActual:0.##}h", $"{gotActual:0.##}h");
             }
@@ -105,7 +126,8 @@ public static class ExportFidelity
 
             var wantBaselineDuration = MpxjMapper.Hours(want.BaselineDuration, hours);
             var gotBaselineDuration = MpxjMapper.Hours(got.BaselineDuration, hours);
-            if (wantBaselineDuration is not null
+            // A zero baseline duration (a milestone) and none at all say the same thing.
+            if (wantBaselineDuration is > 0
                 && (gotBaselineDuration is null || Math.Abs(wantBaselineDuration.Value - gotBaselineDuration.Value) > 0.1))
             {
                 Lost("baselineDuration", want, $"{wantBaselineDuration:0.##}h",
@@ -114,7 +136,13 @@ public static class ExportFidelity
         }
 
         return losses
-            .Select(kv => new FidelityLoss { Field = kv.Key, Tasks = kv.Value.Count, Examples = kv.Value.Take(5).ToList() })
+            .Select(kv => new FidelityLoss
+            {
+                Field = kv.Key,
+                Tasks = kv.Value.Count,
+                Examples = kv.Value.Take(5).ToList(),
+                Critical = kv.Key is not ("duration" or "actualDuration" or "actualWork"),
+            })
             .OrderByDescending(l => l.Tasks)
             .ToList();
     }
@@ -134,6 +162,13 @@ public static class ExportFidelity
     public static string Describe(IReadOnlyList<FidelityLoss> losses) =>
         string.Join(" ", losses.Select(l =>
             $"{l.Field}: {l.Tasks} task(s) (e.g. {string.Join("; ", l.Examples.Take(2))})."));
+
+    /// <summary>The same moment — or, when the source gave only a date (00:00, outside any working
+    /// day), the same date: Project moves such a time to the edge of the working day and the date is
+    /// what was recorded.</summary>
+    private static bool SameMoment(DateTime? want, DateTime? got) =>
+        SameMinute(want, got)
+        || want is { TimeOfDay.Ticks: 0 } w && got is { } g && (g.Date == w.Date || g.Date == w.Date.AddDays(-1) && g.Hour >= 12);
 
     private static bool SameMinute(DateTime? a, DateTime? b) =>
         a is null ? b is null : b is not null && Math.Abs((a.Value - b.Value).TotalMinutes) < 1;

@@ -14,10 +14,19 @@ All notable changes to this project are documented here. The format follows
   assignment work when it imports MSPDI, and the hand-off leaves out started tasks' placeholder
   assignments (they are what put their dates on the wrong calendar). Progress and the status date
   are now set back through Project's own fields before saving.
+- **Attaching to a running Microsoft Project crashed the server.** `Activator.CreateInstance` against
+  an open Project was measured to kill the .NET runtime outright (Internal CLR error 0x80131506,
+  reproducible from bare PowerShell) — the server died with no error. It now takes the running
+  instance from the running-object table, as other COM clients do, and only creates one when none runs.
+- Progress is restored in the order Project honours, measured on a real 215-task schedule: finished
+  tasks get actual finish then actual start; work in progress gets percent, then actual start, then
+  percent again (Project ignores an actual start on a task at 0%).
 - **A .mpp is only written if it reads back intact.** It is saved beside the target, reopened, and
   compared task by task — percent complete, actual start and finish, actual duration and work,
   baseline, status date. Only a matching file replaces the target; otherwise the export fails with
-  what was lost and the target is left untouched.
+  what was lost and the target is left untouched. Durations and actual work that Project re-derives
+  because the source states them inconsistently with its own dates are written, with a WARNING
+  naming each task — never as a plain success.
 - **Every other export says what it kept.** MSPDI reports "Verified"; MPX (baseline without times),
   XER (no baseline) and PMXML (no in-progress percent) report a WARNING naming the loss instead of
   plain success.
