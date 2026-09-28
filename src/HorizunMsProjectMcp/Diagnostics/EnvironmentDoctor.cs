@@ -142,7 +142,7 @@ public static class EnvironmentDoctor
             // Still COM only: nothing else can author the binary format, and resource levelling
             // is Microsoft Project's own heuristic rather than a published algorithm.
             ["write_native_mpp"] = canWriteMpp,
-            ["level_resources"] = com,
+            ["level_resources"] = Analysis.Scheduler.UsesProject, // Project levels, wherever it calculates
             ["native_engine"] = Analysis.Scheduler.UsesProject, // dates are Project's own, not an imitation
         };
     }

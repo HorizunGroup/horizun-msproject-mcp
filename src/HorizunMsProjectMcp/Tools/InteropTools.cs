@@ -70,13 +70,15 @@ public static class InteropTools
         // An export is a copy. Written over a schedule that is open here, it would replace that file
         // behind its handle's back — and from a read-only handle, write the very file it promised not
         // to touch. Saving the original is project_save's job, with its checks.
+        // Writing a read-write document over its own file is a save by another name, and allowed.
         var open = SessionStore.All().FirstOrDefault(s =>
-            string.Equals(Path.GetFullPath(s.Path), full, StringComparison.OrdinalIgnoreCase));
+            string.Equals(Path.GetFullPath(s.Path), full, StringComparison.OrdinalIgnoreCase)
+            && (s.ReadOnly || !ReferenceEquals(s, session)));
         if (open is not null)
         {
             throw new McpToolException(
-                $"'{full}' is a schedule open here{(open.ReadOnly ? " read-only" : "")}; an export never "
-                + "writes over it. Export to another path, or use project_save on a read-write handle.");
+                $"'{full}' is {(open.ReadOnly ? "a schedule open read-only" : "another schedule open")} here; an export "
+                + "never writes over it. Export to another path, or use project_save on its read-write handle.");
         }
         var directory = Path.GetDirectoryName(full);
         if (!string.IsNullOrEmpty(directory))

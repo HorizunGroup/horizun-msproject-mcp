@@ -349,9 +349,12 @@ def main() -> int:
         print("\n== capability honesty ==")
         engine = client.call("schedule_update", handle=handle, op="level_resources")
         refused = "__error__" in engine and "not available on this backend" in engine["__error__"]
-        check("resource levelling is refused rather than imitated",
-              refused if backend == "mpxj" else True,
-              engine.get("__error__", "")[:140])
+        # Levelling is Microsoft Project's own heuristic: done by Project where it calculates, refused
+        # (never imitated) where it does not.
+        levels = client.call("project_health").get("capabilities", {}).get("level_resources")
+        check("resource levelling is done by Microsoft Project or refused, never imitated",
+              (engine.get("applied") == 1) if levels else refused,
+              engine.get("__error__", json.dumps(engine))[:140])
 
         recalc = client.call("schedule_update", handle=handle, op="recalculate")
         check("recalculation is available on the file backend and succeeds",

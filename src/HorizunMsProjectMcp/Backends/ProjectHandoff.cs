@@ -45,6 +45,7 @@ public static class ProjectHandoff
         var document = XDocument.Load(path);
         var root = document.Root ?? throw new McpToolException("The MSPDI export came back empty.");
         AnchorUnassignedResource(root);
+        KeepResourcesLevelable(project, root);
 
         var tasks = root.Element(Ns + "Tasks")?.Elements(Ns + "Task")
                         .Where(t => Text(t, "UID") is not null)
@@ -117,6 +118,55 @@ public static class ProjectHandoff
         }
 
         document.Save(path);
+    }
+
+    /// <summary>
+    /// MPXJ does not read a resource's "Can level" (nor a task's "Level assignments") from an .mpp and
+    /// writes the unknown as No. Handed
+    /// over like that, Project could level nobody, and every .mpp written through it came back with
+    /// levelling switched off on every resource. What the schedule never said is Project's default,
+    /// Yes; a No the schedule does state is kept.
+    /// </summary>
+    private static void KeepResourcesLevelable(ProjectFile project, XElement root)
+    {
+        var unknown = project.Resources
+            .Where(r => r.UniqueID is not null && r.Get(ResourceField.CanLevel) is null)
+            .Select(r => r.UniqueID!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .ToHashSet();
+        foreach (var resource in root.Element(Ns + "Resources")?.Elements(Ns + "Resource") ?? Enumerable.Empty<XElement>())
+        {
+            if (Text(resource, "UID") is { } uid && unknown.Contains(uid) && resource.Element(Ns + "CanLevel") is { } flag)
+            {
+                flag.Value = "1";
+            }
+
+            // Figures Project derives, which MPXJ writes stale — a peak of 100% and no overallocation
+            // for a crew booked at 400%, a span from before the latest edits. Project believed them:
+            // measured, a file carrying them could not be levelled, the same file without them could.
+            foreach (var derived in new[] { "PeakUnits", "OverAllocated", "Start", "Finish" })
+            {
+                resource.Element(Ns + derived)?.Remove();
+            }
+        }
+        // Tasks the same: "Level assignments" and "Leveling can split" unknown to MPXJ went over as No,
+        // so even a levelable resource had nothing Project was allowed to move.
+        var tasks = project.Tasks.Where(t => t.UniqueID is not null)
+            .ToDictionary(t => t.UniqueID!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        foreach (var task in root.Element(Ns + "Tasks")?.Elements(Ns + "Task") ?? Enumerable.Empty<XElement>())
+        {
+            if (Text(task, "UID") is not { } uid || !tasks.TryGetValue(uid, out var model))
+            {
+                continue;
+            }
+
+            foreach (var (element, field) in new[] { ("LevelAssignments", TaskField.LevelAssignments), ("LevelingCanSplit", TaskField.LevelingCanSplit) })
+            {
+                if (model.Get(field) is null && task.Element(Ns + element) is { } flag)
+                {
+                    flag.Value = "1";
+                }
+            }
+        }
     }
 
     /// <summary>

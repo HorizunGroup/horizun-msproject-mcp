@@ -6,6 +6,39 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-09-28
+
+1.4.0 run against Microsoft Project itself (16, Spanish), on a copy of the real schedule and on the
+engine suite. What it found:
+
+### Fixed
+
+- **A crew's units were lost on the way to Project.** MPXJ sizes a new assignment's work from the
+  task's duration alone, and Project believes the work: a crew assigned at 200% worked at 100%, and
+  nothing could be found overallocated, let alone levelled. Work is now duration × units.
+- **A material's quantity came back wrong**: 15 bags of cement on a 3-day task were read by Project
+  as 24 (MPXJ wrote the duration as the work, and the quantity divided by 100). The work of a
+  material is now its quantity.
+- **Levelling moved nothing.** Three things stopped Project, each measured: MPXJ writes "Can level"
+  and "Level assignments" as No when it never read them (every resource and task in every .mpp
+  written through it came back with levelling off), and stale peak units and spans on each resource.
+  Unknown flags now go over as Project's default, Yes, and the derived figures are left for Project
+  to compute. `level_resources` is now available wherever Project calculates, not only on the old
+  COM backend.
+- An export over a read-write document's own file is a save, and is allowed again; only a read-only
+  document's file or another open document's is refused (the 1.4.0 guard was too broad).
+
+### Verified against Microsoft Project
+
+- `project-engine-test.py` gains a build-and-export section: an outline with a task added later under
+  an earlier summary, 'Peón' at 400%, a material by quantity, a Saturday half-day, levelling, and the
+  .mpp read back — 29 checks, all passing with Project 16. Acceptance (65) and scheduler (45) pass
+  with Project as the engine.
+- On a copy of the real schedule: outline levels and WBS, 'Peón' keeping its work at 400% with
+  nothing moved to 'Electricista', max units, the project calendar's Saturday, task calendar, fixed
+  and baseline cost — all kept in the .mpp Project wrote.
+- Still not exercised: the retry after 0x80080005, which needs the failure to be provoked.
+
 ## [1.4.0] - 2026-09-28
 
 A field report from building and running a real construction schedule end to end — baseline,
@@ -96,11 +129,7 @@ hand.
 
 ### Not verified against Microsoft Project
 
-These change what is handed to Project and were checked on the MSPDI, not by Project itself on this
-release's machine: the outline and resources in a written .mpp, the unassigned-resource calendar,
-levelling, and the COM start retry. `tools/project-engine-test.py` covers the hand-off where Project
-is installed. Reassignments to 'Peón' that came back as 'Electricista' were not reproduced outside
-Project; such an export now fails verification instead of passing.
+Verified in 1.4.1, which fixes what that turned up.
 
 ## [1.3.0] - 2026-09-27
 

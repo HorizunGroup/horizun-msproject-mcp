@@ -304,10 +304,10 @@ python tools/smoke-test.py        # 15 checks, environment and capabilities
 python tools/packaging-test.py    # 33 checks, the metadata every client reads
 python tools/imported-file-test.py   # 16 checks, building on a file Project saved
 python tools/planner-features-test.py  # 32 checks, calendars, costs, outline, scenarios, read-only safety
-python tools/project-engine-test.py  # 20 checks, Microsoft Project as the engine (needs Project)
+python tools/project-engine-test.py  # 29 checks, Microsoft Project as the engine (needs Project)
 ```
 
-**312 checks**, driven over real JSON-RPC against the running server, on Windows and on
+**321 checks**, driven over real JSON-RPC against the running server, on Windows and on
 Linux. With Microsoft Project installed the suites run with Project calculating the dates, and
 `project-engine-test.py` compares the server against Project doing the same thing by hand — dates,
 progress and summaries, task by task — and checks that a Project you have open is left exactly as it
@@ -375,7 +375,7 @@ tools/
   packaging-test.py    versions, identifiers and client manifests agree, 33 checks
   imported-file-test.py   a schedule Microsoft Project saved: ids, outline, custom fields, capacity, 16 checks
   planner-features-test.py  calendars, costs, outline, scenarios, S-curve, read-only safety, 32 checks
-  project-engine-test.py  Microsoft Project as the engine, against Project by hand, 20 checks
+  project-engine-test.py  Microsoft Project as the engine, against Project by hand, 29 checks
 ```
 
 Design rationale and the market benchmark that motivated it: [DESIGN-TOOL-SURFACE.md](DESIGN-TOOL-SURFACE.md)

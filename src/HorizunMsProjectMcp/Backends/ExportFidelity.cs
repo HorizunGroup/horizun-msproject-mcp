@@ -262,7 +262,9 @@ public static class ExportFidelity
     private static string ResourcesOf(MPXJ.Net.Task task) =>
         string.Join(", ", task.ResourceAssignments
             .Where(a => a.Resource is { UniqueID: not null and not 0 } r && !string.IsNullOrEmpty(r.Name))
-            .Select(a => $"{a.Resource!.Name}@{Math.Round(a.Units ?? 100)}%")
+            .Select(a => a.Resource!.Type == ResourceType.Material
+                ? $"{a.Resource!.Name}@{Math.Round((a.Units ?? 0) / 100.0, 2)} {a.Resource!.MaterialLabel}".TrimEnd()
+                : $"{a.Resource!.Name}@{Math.Round(a.Units ?? 100)}%")
             .OrderBy(x => x, StringComparer.Ordinal));
 
     private static bool SameAmount(double? a, double? b) => Math.Abs((a ?? 0) - (b ?? 0)) < 0.01;

@@ -273,6 +273,64 @@ def main() -> None:
           all((want[u].get("baselineFinish") or "")[:16] == (got.get(u, {}).get("baselineFinish") or "")[:16] for u in want))
     check("the status date survives", (info.get("statusDate") or "")[:10] == "2027-02-28", str(info.get("statusDate")))
 
+    # 2c. Building on a schedule and writing it to .mpp: outline, Unicode resources, crews, materials,
+    # calendars, levelling. Found in 1.3.0 on a real schedule: tasks one level too high, WBS "0",
+    # 'Peón' written as 'Electricista', 15 bags of cement read back as 24, and no resource levelable.
+    print("\nbuilding on a schedule and writing it to .mpp")
+    mcp = Mcp()
+    try:
+        h = mcp.call("project_open", path=str(work / "obra.xml"), create=True, name="Obra",
+                     startDate="2026-11-02")["handle"]
+        mcp.call("calendars_write", handle=h, ops=[
+            {"op": "create", "name": "Obra L-S"}, {"op": "set_project_calendar", "name": "Obra L-S"},
+            {"op": "set_week", "name": "Obra L-S", "days": "sat", "hours": "08:00-13:00"}])
+        mcp.call("tasks_write", handle=h, ops=[
+            {"op": "create", "name": "Preliminares", "key": "pre"},
+            {"op": "create", "name": "Obras provisionales", "key": "op", "parentKey": "pre"},
+            {"op": "create", "name": "Cerco", "parentKey": "op", "duration": "3d"},
+            {"op": "create", "name": "Movimiento de tierras", "key": "mt"},
+            {"op": "create", "name": "Excavación", "parentKey": "mt", "duration": "5d"},
+            {"op": "create", "name": "Zanjas", "parentKey": "mt", "duration": "5d"}])
+        rows = {t["name"]: t for t in mcp.call("tasks_query", handle=h, limit=100)["items"]}
+        # Added under an earlier summary after later rows exist.
+        mcp.call("tasks_write", handle=h, ops=[
+            {"op": "create", "name": "Caseta", "parentUid": rows["Obras provisionales"]["uid"], "duration": "2d"}])
+        mcp.call("resources_write", handle=h, ops=[
+            {"op": "create", "name": "Peón", "maxUnits": 800}, {"op": "create", "name": "Electricista", "maxUnits": 200},
+            {"op": "create", "name": "Cemento", "type": "Material", "materialLabel": "bls", "standardRate": 28}])
+        res = {r.get("name"): r["uid"] for r in mcp.call("resources_query", handle=h)["items"]}
+        rows = {t["name"]: t for t in mcp.call("tasks_query", handle=h, limit=100)["items"]}
+        mcp.call("resources_write", handle=h, ops=[
+            {"op": "assign", "uid": res["Peón"], "taskUid": rows["Caseta"]["uid"], "units": 400},
+            {"op": "assign", "uid": res["Cemento"], "taskUid": rows["Caseta"]["uid"], "units": 15},
+            {"op": "assign", "uid": res["Electricista"], "taskUid": rows["Excavación"]["uid"], "units": 200},
+            {"op": "assign", "uid": res["Electricista"], "taskUid": rows["Zanjas"]["uid"], "units": 200}])
+        level = mcp.call("schedule_update", handle=h, op="level_resources")
+        rows = {t["name"]: t for t in mcp.call("tasks_query", handle=h, limit=100)["items"]}
+        exported = mcp.call("project_export", handle=h, path=str(work / "obra.mpp"), format="mpp")
+        back = mcp.call("project_open", path=str(work / "obra.mpp"), mode="readonly")["handle"]
+        got = {t["name"]: t for t in mcp.call("tasks_query", handle=back, limit=100)["items"]}
+        people = {r.get("name"): r for r in mcp.call("resources_query", handle=back, includeAssignments=True)["items"]}
+        week = mcp.call("project_info", handle=back)["workingWeek"]
+    finally:
+        mcp.close()
+    check("levelling runs in Project and separates the two tasks on one crew",
+          level["applied"] == 1 and (rows["Excavación"]["finish"] <= rows["Zanjas"]["start"]
+                                     or rows["Zanjas"]["finish"] <= rows["Excavación"]["start"]),
+          f'{rows["Excavación"]["start"]}..{rows["Excavación"]["finish"]} / {rows["Zanjas"]["start"]}..{rows["Zanjas"]["finish"]}')
+    check("the .mpp export is verified", any("Verified" in n for n in exported.get("notes", [])), json.dumps(exported)[:300])
+    check("outline levels and WBS come back as built",
+          {n: (got[n].get("outlineLevel"), got[n].get("wbs")) for n in ["Preliminares", "Obras provisionales", "Cerco", "Caseta",
+                                                                          "Movimiento de tierras", "Zanjas"]}
+          == {"Preliminares": (1, "1"), "Obras provisionales": (2, "1.1"), "Cerco": (3, "1.1.1"), "Caseta": (3, "1.1.2"),
+              "Movimiento de tierras": (1, "2"), "Zanjas": (2, "2.2")},
+          json.dumps({n: (t.get("outlineLevel"), t.get("wbs")) for n, t in got.items()}, ensure_ascii=False))
+    on_caseta = {r: next((a["units"] for a in people[r].get("assignments") or [] if a["taskName"] == "Caseta"), None)
+                 for r in ["Peón", "Electricista", "Cemento"]}
+    check("'Peón' keeps its work at 400%, nothing lands on 'Electricista', cement is 15 bags",
+          on_caseta == {"Peón": 400, "Electricista": None, "Cemento": 15}, json.dumps(on_caseta, ensure_ascii=False))
+    check("Saturday 08:00-13:00 on the project calendar", week.get("Saturday") == "08:00-13:00", json.dumps(week))
+
     # 3. A guest in the user's Project.
     print("\nsharing a Project the user has open")
     import win32com.client

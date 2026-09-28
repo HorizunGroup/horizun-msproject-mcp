@@ -262,10 +262,10 @@ python tools/smoke-test.py        # 15 chequeos, entorno y capacidades
 python tools/packaging-test.py    # 33 chequeos, la metadata que lee cada cliente
 python tools/imported-file-test.py   # 16 chequeos, construir sobre un archivo guardado por Project
 python tools/planner-features-test.py  # 32 chequeos, calendarios, costos, esquema, escenarios, solo lectura
-python tools/project-engine-test.py  # 20 chequeos, Microsoft Project como motor (requiere Project)
+python tools/project-engine-test.py  # 29 chequeos, Microsoft Project como motor (requiere Project)
 ```
 
-**312 chequeos**, ejecutados sobre JSON-RPC real contra el servidor corriendo, en Windows y en
+**321 chequeos**, ejecutados sobre JSON-RPC real contra el servidor corriendo, en Windows y en
 Linux. Con Microsoft Project instalado, las suites corren con Project calculando las fechas, y
 `project-engine-test.py` compara el servidor contra Project haciendo lo mismo a mano — fechas, avance
 y resúmenes, tarea por tarea — y verifica que un Project que tengas abierto quede exactamente como

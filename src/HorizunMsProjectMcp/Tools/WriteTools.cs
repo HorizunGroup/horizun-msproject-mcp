@@ -1557,7 +1557,29 @@ public static class WriteTools
                     }
 
                     var assignment = task.AddResourceAssignment(resource);
-                    assignment.Units = op.Units ?? 100;
+                    var isMaterial = resource.Type == ResourceType.Material;
+                    if (isMaterial)
+                    {
+                        // A material is assigned a quantity. MPXJ holds it ×100, as it does percentages,
+                        // and left alone it writes the task's duration as the work — Microsoft Project
+                        // read 15 bags on a 3-day task as 24. The work of a material is its quantity.
+                        var quantity = op.Units ?? 1;
+                        assignment.Units = quantity * 100;
+                        assignment.Work = MPXJ.Net.Duration.GetInstance(quantity, TimeUnit.Hours);
+                        assignment.RemainingWork = assignment.Work;
+                    }
+                    else
+                    {
+                        // Work is duration × units. MPXJ sizes a new assignment's work from the duration
+                        // alone, and Microsoft Project believes the work: a crew assigned at 200% came
+                        // back working at 100%, and nothing overallocated could be levelled.
+                        assignment.Units = op.Units ?? 100;
+                        var hours = (MpxjMapper.Hours(task.Duration, MpxjMapper.HoursPerDay) ?? 0) * assignment.Units.Value / 100.0;
+                        var share = Math.Clamp(Convert.ToDouble(task.PercentageComplete ?? 0) / 100.0, 0, 1);
+                        assignment.Work = MPXJ.Net.Duration.GetInstance(hours, TimeUnit.Hours);
+                        assignment.ActualWork = MPXJ.Net.Duration.GetInstance(hours * share, TimeUnit.Hours);
+                        assignment.RemainingWork = MPXJ.Net.Duration.GetInstance(hours * (1 - share), TimeUnit.Hours);
+                    }
 
                     // Assigned to work already finished, it is finished too. Left open, Project
                     // gives it remaining work, drops the task to 99% and schedules the rest
@@ -1571,8 +1593,8 @@ public static class WriteTools
 
                         // Project derives an assignment's progress from its work, so the work is
                         // stated as done: a crew's hours over the task, a material's quantity.
-                        var amount = resource.Type == ResourceType.Material
-                            ? assignment.Units ?? 0
+                        var amount = isMaterial
+                            ? (assignment.Units ?? 0) / 100.0
                             : (MpxjMapper.Hours(task.ActualDuration ?? task.Duration, MpxjMapper.HoursPerDay) ?? 0)
                               * (assignment.Units ?? 100) / 100.0;
                         var done = MPXJ.Net.Duration.GetInstance(amount, TimeUnit.Hours);

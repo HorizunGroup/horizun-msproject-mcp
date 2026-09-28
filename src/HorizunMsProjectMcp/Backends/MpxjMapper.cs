@@ -217,7 +217,8 @@ public static class MpxjMapper
         ResourceUid = assignment.Resource?.UniqueID ?? -1,
         TaskName = assignment.Task?.Name,
         ResourceName = assignment.Resource?.Name,
-        Units = assignment.Units,
+        // A material's units are its quantity, which MPXJ holds ×100.
+        Units = assignment.Resource?.Type == ResourceType.Material && assignment.Units is { } q ? q / 100.0 : assignment.Units,
         WorkHours = Hours(assignment.Work),
         Cost = assignment.Cost,
         Start = Iso(assignment.Start),

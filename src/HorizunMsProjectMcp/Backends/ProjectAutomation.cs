@@ -355,7 +355,8 @@ public sealed class ProjectHost
         CallNamed(_app, "LevelingOptions",
             ("Automatic", false), ("DelayInSlack", withinSlack), ("AutoClearLeveling", true),
             ("LevelEntireProject", true), ("LevelingCanSplit", canSplit));
-        CallNamed(_app, "LevelNow", ("All", true));
+        // Positional: LevelNow has one argument, All, and without it Project levels only the selection.
+        Call(_app, "LevelNow", true);
         Call(_app, "CalculateProject");
     }
 
