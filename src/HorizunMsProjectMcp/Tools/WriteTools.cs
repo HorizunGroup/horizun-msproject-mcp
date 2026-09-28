@@ -1058,7 +1058,7 @@ public static class WriteTools
         + "refused outright on the MPXJ backend rather than approximated.")]
     public static WriteResult ScheduleUpdate(
         [Description("Document handle from project_open.")] string handle,
-        [Description("save_baseline, clear_baseline, set_status_date, reschedule_incomplete, level_resources, or recalculate.")]
+        [Description("save_baseline, clear_baseline, set_status_date, reschedule_incomplete, load_budget, level_resources, or recalculate.")]
         string op,
         [Description("Baseline slot 0-10 for save_baseline and clear_baseline. Defaults to 0.")]
         int baseline = 0,
@@ -1068,6 +1068,15 @@ public static class WriteTools
             "Allow save_baseline to replace a baseline that already holds data. Off by default: "
             + "overwriting one destroys the original plan every variance is measured against.")]
         bool overwriteBaseline = false,
+        [Description(
+            "Why — recorded in the change log. Required to replace a baseline (a rebaseline is a change to "
+            + "the approved plan and has to be justified); recommended for every save_baseline and load_budget.")]
+        string? reason = null,
+        [Description("Who approved the change, for the change log.")] string? approvedBy = null,
+        [Description("For load_budget: amount per code, e.g. {\"D021-A1-A01\": 125000000}.")]
+        Dictionary<string, double>? budget = null,
+        [Description("For load_budget: or a CSV of code,amount.")] string? budgetPath = null,
+        [Description("For load_budget: the task field holding the code. Defaults to Text1.")] string codeField = "Text1",
         [Description("Simulate against a copy and report the impact without committing.")] bool dryRun = false)
     {
         return SessionStore.UseForWrite(handle, session =>
@@ -1102,6 +1111,19 @@ public static class WriteTools
                         var existing = project.Tasks.Count(t => baseline == 0
                             ? t.BaselineFinish is not null
                             : SafeBaselineFinish(t, baseline) is not null);
+
+                        if (existing > 0 && overwriteBaseline && string.IsNullOrWhiteSpace(reason))
+                        {
+                            throw new McpToolException(
+                                $"Replacing baseline {baseline} is a rebaseline — a change to the approved plan — and needs a "
+                                + "reason for the change log (pass reason, and approvedBy). Integrated change control "
+                                + "means the record of why the plan moved outlives the plan itself.");
+                        }
+
+                        var previousFinish = project.Tasks.Where(t => !t.Summary)
+                            .Select(t => baseline == 0 ? t.BaselineFinish : SafeBaselineFinish(t, baseline))
+                            .Where(d => d is not null).DefaultIfEmpty().Max();
+                        var previousBudget = project.Tasks.Where(t => !t.Summary).Sum(t => Convert.ToDouble(t.BaselineCost ?? 0));
 
                         if (existing > 0 && !overwriteBaseline)
                         {
@@ -1144,6 +1166,84 @@ public static class WriteTools
                                 : WriteEngine.Reject(-1, "save_baseline", $"baseline {slot}", "no dates stored",
                                     "No baseline dates were present when the model was re-read.");
                         });
+
+                        if (!dryRun)
+                        {
+                            var newFinish = project.Tasks.Where(t => !t.Summary).Select(t => t.Finish)
+                                .Where(d => d is not null).DefaultIfEmpty().Max();
+                            var newBudget = project.Tasks.Where(t => !t.Summary).Sum(t => Convert.ToDouble(t.Cost ?? 0));
+                            Analysis.PmoLedger.Record(session.Path, new Analysis.ChangeEntry
+                            {
+                                Kind = existing > 0 ? "rebaseline" : "baseline",
+                                Summary = $"Baseline {slot} {(existing > 0 ? "replaced" : "saved")}.",
+                                Reason = reason,
+                                ApprovedBy = approvedBy,
+                                FinishBefore = MpxjMapper.Iso(previousFinish),
+                                FinishAfter = MpxjMapper.Iso(newFinish),
+                                FinishDeltaDays = previousFinish is null || newFinish is null ? null
+                                    : Math.Round((newFinish.Value - previousFinish.Value).TotalDays, 1),
+                                BudgetBefore = previousBudget,
+                                BudgetAfter = newBudget,
+                            });
+                        }
+
+                        break;
+                    }
+
+                    case "load_budget":
+                    {
+                        var current = new PendingOp { Label = "load_budget" };
+                        pending.Add(current);
+                        var lines = budget is { Count: > 0 }
+                            ? budget
+                            : !string.IsNullOrWhiteSpace(budgetPath)
+                                ? Writes.BudgetLoader.ReadCsv(Guard.ExistingFile(budgetPath, "budgetPath"))
+                                : throw new McpToolException("load_budget needs 'budget' (code to amount) or 'budgetPath' (a CSV of code,amount).");
+                        var before = project.Tasks.Where(t => !t.Summary).Sum(t => Convert.ToDouble(t.Cost ?? 0));
+                        var loaded = Writes.BudgetLoader.Load(project, lines, codeField);
+                        foreach (var note in loaded.Notes)
+                        {
+                            rejected.Add(new RejectedWrite { Field = "load_budget", Reason = note });
+                        }
+
+                        if (loaded.CodesWithoutTasks.Count > 0)
+                        {
+                            rejected.Add(new RejectedWrite
+                            {
+                                Field = "budget",
+                                Reason = "Budget lines with no task carrying their code: " + string.Join("; ", loaded.CodesWithoutTasks.Take(15)),
+                            });
+                        }
+
+                        rejected.Add(new RejectedWrite
+                        {
+                            Field = "load_budget",
+                            Reason = $"Loaded {loaded.Loaded:N0} of a {loaded.BudgetTotal:N0} budget onto {loaded.TasksCosted} task(s); "
+                                     + $"{loaded.TasksWithoutBudget} detail task(s) carry no budget.",
+                        });
+
+                        var expected = loaded.Loaded;
+                        current.Checks.Add(file =>
+                        {
+                            var total = file.Tasks.Where(t => !t.Summary).Sum(t => Convert.ToDouble(t.FixedCost ?? 0));
+                            return Math.Abs(total - expected) < Math.Max(1, expected * 0.001)
+                                ? null
+                                : WriteEngine.Reject(-1, "load_budget", expected, total, "The loaded costs did not survive the write.");
+                        });
+
+                        if (!dryRun)
+                        {
+                            Analysis.PmoLedger.Record(session.Path, new Analysis.ChangeEntry
+                            {
+                                Kind = "budget",
+                                Summary = $"Budget loaded: {loaded.Loaded:N0} on {loaded.TasksCosted} task(s).",
+                                Reason = reason,
+                                ApprovedBy = approvedBy,
+                                BudgetBefore = before,
+                                BudgetAfter = loaded.Loaded,
+                            });
+                        }
+
                         break;
                     }
 

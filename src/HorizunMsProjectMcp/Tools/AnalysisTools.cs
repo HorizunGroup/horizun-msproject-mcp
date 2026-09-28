@@ -14,18 +14,86 @@ public static class AnalysisTools
         "Answer questions about the schedule without downloading it. Computes the critical path, the "
         + "float distribution, the driving (longest) path, day-by-day resource overallocation, milestone "
         + "status against deadlines and baseline, and the health of the dependency network. "
+        + "PMO control: status_report is the period report (planned vs earned %, SPI/CPI, earned-schedule "
+        + "SPI(t), EAC by three methods, TCPI, forecast finish, milestones at risk, trend of past cut-offs, "
+        + "health); lookahead is the short-interval (Last Planner) plan for the next weeks with each task's "
+        + "constraints and ready/constrained state, plus PPC of the last recorded commitment; change_log "
+        + "lists every rebaseline, budget load and committed edit with reason, approver and finish impact. "
         + "Ask for only the aspects you need — each one is computed independently.")]
     public static ScheduleAnalysis ScheduleAnalyze(
         [Description("Document handle from project_open.")] string handle,
         [Description(
             "Which analyses to run: critical_path, float_distribution, longest_path, overallocation, "
-            + "milestones, dependency_health. Omit for all except longest_path.")]
-        string[]? aspects = null)
+            + "milestones, dependency_health, status_report, lookahead, change_log. Omit for the first six "
+            + "except longest_path.")]
+        string[]? aspects = null,
+        [Description("Status date for status_report and lookahead, yyyy-MM-dd. Defaults to the project's status date, then today.")]
+        string? statusDate = null,
+        [Description("Look-ahead window in weeks (1-8). Defaults to 3.")]
+        int weeks = 3,
+        [Description("lookahead: record the first week's ready tasks as the team's commitment, so the next report measures PPC against it.")]
+        bool commit = false,
+        [Description("status_report: keep this cut-off in the project's history (.hzpmo.json beside the file) for the trend.")]
+        bool record = false)
     {
         return SessionStore.Use(handle, session =>
         {
-            return ScheduleAnalyzer.Analyze(session.File, aspects ?? Array.Empty<string>());
-    });
+            var list = aspects ?? Array.Empty<string>();
+            var want = list.Select(a => a.Trim().ToLowerInvariant()).ToHashSet();
+            var classic = list.Where(a => a.Trim().ToLowerInvariant() is not ("status_report" or "lookahead" or "change_log")).ToList();
+            var result = list.Length == 0 || classic.Count > 0
+                ? ScheduleAnalyzer.Analyze(session.File, classic)
+                : new ScheduleAnalysis();
+            var effective = QueryTools.ParseDate(statusDate)
+                            ?? session.File.ProjectProperties.StatusDate
+                            ?? DateTime.Today;
+            return result with
+            {
+                StatusReport = want.Contains("status_report")
+                    ? PmoControl.Status(session.File, effective, session.Path, record) : null,
+                Lookahead = want.Contains("lookahead")
+                    ? PmoControl.Lookahead(session.File, effective, Math.Clamp(weeks, 1, 8), session.Path, commit) : null,
+                ChangeLog = want.Contains("change_log") && session.Path is not null
+                    ? PmoLedger.Load(session.Path).Changes : null,
+            };
+        });
+    }
+
+    [McpServerTool(Name = "schedule_risk")]
+    [Description(
+        "Quantitative schedule risk analysis (Monte Carlo). Samples every remaining duration from a "
+        + "three-point range and re-runs the network logic (all four link types and lags) thousands of "
+        + "times, then reports the finish date at P10/P50/P80/P90, the probability of meeting a target "
+        + "and the baseline finish, the contingency needed for P80, and the risk drivers — how often "
+        + "each task is critical (criticality) and how strongly it moves the finish (sensitivity). "
+        + "Give per-task ranges from the team where you have them; the rest get the default spread.")]
+    public static RiskReport ScheduleRiskTool(
+        [Description("Document handle from project_open.")] string handle,
+        [Description("Number of simulations (100-20000). Defaults to 2000.")] int iterations = 2000,
+        [Description("Default optimistic deviation of remaining duration, percent (negative). Defaults to -10.")]
+        double optimisticPct = -10,
+        [Description("Default pessimistic deviation of remaining duration, percent. Defaults to 30.")]
+        double pessimisticPct = 30,
+        [Description("Per-task three-point ranges in working days, keyed by UniqueID: {\"12\": {\"optimistic\":4, \"mostLikely\":5, \"pessimistic\":9}}.")]
+        Dictionary<string, RiskRange>? ranges = null,
+        [Description("Target finish date to test, yyyy-MM-dd.")] string? target = null,
+        [Description("triangular (default) or pert.")] string distribution = "triangular",
+        [Description("Random seed, for a repeatable run.")] int? seed = null,
+        [Description("Data date the simulation starts from, yyyy-MM-dd. Defaults to the status date, then the project start.")]
+        string? statusDate = null)
+    {
+        return SessionStore.Use(handle, session =>
+        {
+            var dataDate = QueryTools.ParseDate(statusDate)
+                           ?? session.File.ProjectProperties.StatusDate
+                           ?? session.File.ProjectProperties.StartDate
+                           ?? DateTime.Today;
+            var parsed = ranges?
+                .Where(kv => int.TryParse(kv.Key, out _))
+                .ToDictionary(kv => int.Parse(kv.Key), kv => kv.Value);
+            return ScheduleRisk.Analyse(session.File, dataDate, iterations, optimisticPct, pessimisticPct,
+                parsed, QueryTools.ParseDate(target), distribution, seed);
+        });
     }
 
     [McpServerTool(Name = "schedule_qa")]

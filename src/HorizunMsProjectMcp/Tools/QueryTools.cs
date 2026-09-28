@@ -57,6 +57,11 @@ public sealed record TimephasedResult
     public required int Buckets { get; init; }
     public required IReadOnlyList<TimephasedBucket> Series { get; init; }
     public required IReadOnlyList<TimephasedBucket> Cumulative { get; init; }
+
+    /// <summary>measure='s_curve': cumulative PV (baseline), EV (earned) and AC (actual cost) curves.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<TimephasedBucket>>? Curves { get; init; }
+    public string? ValueMeasure { get; init; }
+    public string? StatusDate { get; init; }
     public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
 }
 
@@ -470,7 +475,9 @@ public static class QueryTools
     public static TimephasedResult TimephasedQuery(
         [Description("Document handle from project_open.")] string handle,
         [Description(
-            "'work' (default), 'cost', 'duration', 'baseline_work', or 'baseline_cost'. Use 'duration' "
+            "'work' (default), 'cost', 'duration', 'baseline_work', 'baseline_cost', or 's_curve' — the "
+            + "earned value S-curve: cumulative PV over the baseline, EV earned to the status date and AC "
+            + "actual cost, in money where the schedule is cost-loaded, else hours, else duration. Use 'duration' "
             + "on a schedule with no loaded hours or costs — many carry neither, and it is the only "
             + "curve they can produce.")]
         string measure = "work",
@@ -512,6 +519,11 @@ public static class QueryTools
                 throw new McpToolException(
                     $"That range at '{step}' granularity would produce about {estimated:0} buckets, over the " +
                     $"{MaxBuckets} limit. Use a coarser granularity or a shorter range.");
+            }
+
+            if (measure.Trim().ToLowerInvariant() == "s_curve")
+            {
+                return SCurve(project, tasks, rangeStart, rangeEnd, step, uids is { Length: > 0 });
             }
 
             var buckets = new SortedDictionary<DateTime, double>();
@@ -602,6 +614,113 @@ public static class QueryTools
                 Notes = notes,
             };
     });
+    }
+
+    private static TimephasedResult SCurve(
+        ProjectFile project, IReadOnlyList<MPXJ.Net.Task> tasks, DateTime rangeStart, DateTime rangeEnd,
+        string step, bool selection)
+    {
+        var (valueMeasure, budget) = ValueWeights.For(project, tasks);
+        var statusDate = project.ProjectProperties.StatusDate ?? DateTime.Today;
+        var pv = new SortedDictionary<DateTime, double>();
+        var ev = new SortedDictionary<DateTime, double>();
+        var ac = new SortedDictionary<DateTime, double>();
+
+        void Spread(SortedDictionary<DateTime, double> into, DateTime? start, DateTime? finish, double amount)
+        {
+            if (start is null || finish is null || Math.Abs(amount) < 0.0001)
+            {
+                return;
+            }
+
+            var days = WorkingDays(start.Value.Date, finish.Value.Date).ToList();
+            if (days.Count == 0)
+            {
+                days.Add(finish.Value.Date);
+            }
+
+            foreach (var day in days.Where(d => d >= rangeStart.Date && d <= rangeEnd.Date))
+            {
+                var key = BucketKey(day, step);
+                into[key] = into.GetValueOrDefault(key) + amount / days.Count;
+            }
+        }
+
+        foreach (var task in tasks.Where(t => t.UniqueID is not null))
+        {
+            var value = budget.GetValueOrDefault(task.UniqueID!.Value);
+            Spread(pv, task.BaselineStart ?? task.Start, task.BaselineFinish ?? task.Finish, value);
+
+            var percent = Convert.ToDouble(task.PercentageComplete ?? 0) / 100.0;
+            if (percent > 0)
+            {
+                var earnedTo = task.ActualFinish ?? (statusDate > (task.ActualStart ?? statusDate) ? statusDate : task.ActualStart);
+                Spread(ev, task.ActualStart ?? task.Start, earnedTo, value * percent);
+                if (valueMeasure == "cost")
+                {
+                    Spread(ac, task.ActualStart ?? task.Start, earnedTo, Convert.ToDouble(task.ActualCost ?? 0));
+                }
+            }
+        }
+
+        IReadOnlyList<TimephasedBucket> Cum(SortedDictionary<DateTime, double> source, bool stopAtStatus)
+        {
+            var keys = pv.Keys.Union(source.Keys).OrderBy(k => k).ToList();
+            var running = 0.0;
+            var list = new List<TimephasedBucket>();
+            foreach (var k in keys)
+            {
+                if (stopAtStatus && k > statusDate)
+                {
+                    break;
+                }
+
+                running += source.GetValueOrDefault(k);
+                list.Add(new TimephasedBucket { Period = k.ToString("yyyy-MM-dd"), Value = Math.Round(running, 2) });
+            }
+
+            return list;
+        }
+
+        var curves = new Dictionary<string, IReadOnlyList<TimephasedBucket>>
+        {
+            ["pv"] = Cum(pv, false),
+            ["ev"] = Cum(ev, true),
+        };
+        var notes = new List<string>
+        {
+            $"Measured in {valueMeasure.Replace('_', ' ')}. PV follows the baseline dates (current dates where a "
+            + "task has no baseline); EV is budget x percent complete, earned between the actual start and the "
+            + "actual finish or the status date; curves stop at the status date " + statusDate.ToString("yyyy-MM-dd") + ".",
+        };
+        if (valueMeasure == "cost")
+        {
+            curves["ac"] = Cum(ac, true);
+            if (ac.Values.Sum() < 0.01)
+            {
+                notes.Add("No actual cost is recorded, so AC is flat at zero — CPI cannot be read from this curve.");
+            }
+        }
+        else
+        {
+            notes.Add("The schedule carries no costs, so there is no AC curve. Load a budget (schedule_update "
+                      + "op='load_budget') to get the curves in money.");
+        }
+
+        var series = curves["pv"];
+        return new TimephasedResult
+        {
+            Measure = "s_curve",
+            Granularity = step,
+            RollUp = selection ? "selection" : "project",
+            Buckets = series.Count,
+            Series = Array.Empty<TimephasedBucket>(),
+            Cumulative = series,
+            Curves = curves,
+            ValueMeasure = valueMeasure,
+            StatusDate = statusDate.ToString("yyyy-MM-dd"),
+            Notes = notes,
+        };
     }
 
     private static IEnumerable<DateTime> WorkingDays(DateTime start, DateTime finish)

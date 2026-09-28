@@ -197,6 +197,22 @@ public static class WriteEngine
             session.Dirty = true;
         }
 
+        // The change log: every committed batch, with what it did to the finish. Baselines and budget
+        // loads write their own, richer entries.
+        if (!dryRun && applied > 0 && !appliedOps.All(op => op.Label is "save_baseline" or "load_budget"))
+        {
+            var impact = MeasureImpact(before, after);
+            Analysis.PmoLedger.Record(session.Path, new Analysis.ChangeEntry
+            {
+                Kind = "edit",
+                Summary = $"{applied} change(s): "
+                          + string.Join(", ", appliedOps.GroupBy(op => op.Label).Select(g => $"{g.Count()} {g.Key}")),
+                FinishBefore = impact.ProjectFinishBefore,
+                FinishAfter = impact.ProjectFinishAfter,
+                FinishDeltaDays = impact.ProjectFinishDeltaDays,
+            });
+        }
+
         return new WriteResult
         {
             DryRun = dryRun,

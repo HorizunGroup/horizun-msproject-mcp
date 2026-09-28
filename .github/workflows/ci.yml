@@ -45,7 +45,7 @@ jobs:
       - name: Environment and capabilities
         run: python tools/smoke-test.py
 
-      - name: All 25 tools, end to end
+      - name: All tools, end to end
         run: python tools/acceptance-test.py
 
       - name: Critical-path engine and format round trips
@@ -62,6 +62,9 @@ jobs:
 
       - name: Exports keep what they claim to keep
         run: python tools/export-fidelity-test.py
+
+      - name: Project control (risk, status, change control, WBS, S-curve)
+        run: python tools/pmo-test.py
 
       # Hosted runners have no Microsoft Project, so this reports itself skipped here. It is run
       # locally, on a machine with Project, before every release (see CONTRIBUTING.md).
@@ -113,7 +116,7 @@ jobs:
       - name: Environment and capabilities
         run: python tools/smoke-test.py
 
-      - name: All 25 tools, end to end
+      - name: All tools, end to end
         run: python tools/acceptance-test.py
 
       - name: Critical-path engine and format round trips
@@ -130,3 +133,6 @@ jobs:
 
       - name: Exports keep what they claim to keep
         run: python tools/export-fidelity-test.py
+
+      - name: Project control (risk, status, change control, WBS, S-curve)
+        run: python tools/pmo-test.py

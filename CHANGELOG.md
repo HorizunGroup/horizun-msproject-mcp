@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-27
+
+It now works as a PMO, not only as a Project operator.
+
+### Added
+
+- `schedule_risk` (new tool): Monte Carlo schedule risk analysis over the network's own logic.
+  P10/P50/P80/P90 finish, probability of a target and of the baseline, P80 contingency, risk drivers
+  by criticality and sensitivity, histogram; triangular or PERT; seeded runs repeat.
+- `schedule_analyze` aspect `status_report`: planned vs earned, SPI, CPI, earned-schedule SPI(t),
+  EAC by three methods, TCPI, forecast finish, milestones at risk, top issues, health, and the trend
+  of recorded cut-offs (`record=true`).
+- `schedule_analyze` aspect `lookahead`: short-interval (Last Planner) plan with constraints, ready vs
+  constrained, weekly commitments (`commit=true`) and PPC.
+- Formal change control and `schedule_analyze` aspect `change_log`: a rebaseline over an existing
+  baseline requires `reason` (and takes `approvedBy`); baselines, budget loads and committed edit
+  batches are logged with their finish impact in `<name>.hzpmo.json` beside the schedule.
+- `schedule_update` op `load_budget`: a budget by code (inline or CSV) loaded onto the tasks as cost,
+  reporting budget lines no task carries and tasks left without budget.
+- `timephased_query` measure `s_curve`: cumulative PV, EV and AC, in money when cost-loaded.
+- WBS rules in `schedule_qa` (100% rule) and `project_export` format `wbs_dictionary`.
+- `schedule_generate` builds a schedule from Revit elements passed inline; `schedule_recovery`
+  returns a planner's replan review.
+- `tools/pmo-test.py`: 19 checks over the control layer, internal engine only.
+
 ### Fixed
 
 - **Exporting to .mpp lost progress.** A 215-task MSPDI with 41 finished and 2 in progress came back

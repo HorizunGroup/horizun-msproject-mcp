@@ -5,6 +5,13 @@
 **Un servidor MCP para Microsoft Project que no necesita ni Java ni Microsoft Project — y que dice
 la verdad sobre lo que escribió.**
 
+**Funciona como una PMO, no como un operador de software.** No se limita a manejar Microsoft Project
+por ti: planifica, controla e informa como lo hace una oficina de gestión de proyectos, siguiendo el
+PMBOK — una EDT que cumple la regla del 100%, una línea base cargada en costo, valor ganado y earned
+schedule, riesgo cuantitativo del cronograma, control formal de cambios con motivo y aprobador,
+planificación semanal lookahead con PPC, y un informe de estado del periodo con su tendencia.
+Project es el motor; el método es el producto.
+
 *[English](README.md)*
 
 Apunta cualquier cliente MCP a un `.mpp`, un `.xer` de Primavera o un `.xml` MSPDI y hazle
@@ -53,7 +60,7 @@ aquí no existen en ningún otro:
 
 ---
 
-## Las 25 herramientas
+## Las 26 herramientas
 
 **Sesión** — `project_health` · `project_open` · `project_save`
 
@@ -106,6 +113,31 @@ Un borrador solo puede estar tan bien secuenciado como los cronogramas de los qu
 las fuentes enlazan cada actividad consigo misma unidad tras unidad pero nunca con los oficios
 vecinos, ambas herramientas lo dicen y dan el número.
 
+**Control de proyecto** — `schedule_risk`, y aspectos PMO de las herramientas de arriba
+
+- **Riesgo cuantitativo del cronograma** (`schedule_risk`): Monte Carlo sobre la lógica de la red, los
+  cuatro tipos de vínculo y sus desfases, con rangos de tres puntos por tarea o una dispersión por
+  defecto. Fin P10/P50/P80/P90, probabilidad de cumplir una meta y la línea base, contingencia al P80,
+  impulsores del riesgo por criticidad y sensibilidad. Con semilla, se repite exacto.
+- **Informe de estado del periodo** (aspecto `status_report` de `schedule_analyze`): planeado vs
+  ganado, SPI, CPI, SPI(t) de earned schedule, EAC por tres métodos, TCPI, fin pronosticado, hitos en
+  riesgo, principales problemas y la tendencia de cada corte registrado.
+- **Cronograma cargado en costo** (op `load_budget` de `schedule_update`): un presupuesto por código,
+  el mismo con que se vincula el BIM, repartido en las tareas como costo; se reportan las líneas que
+  ninguna tarea lleva. La medida `s_curve` de `timephased_query` devuelve PV, EV y AC acumulados, en
+  dinero cuando hay costos.
+- **Control integrado de cambios**: re-basar exige `reason` (y acepta `approvedBy`); cada línea base,
+  carga de presupuesto y lote de edición confirmado queda registrado con su impacto en el fin
+  (aspecto `change_log`).
+- **Planificación de intervalo corto** (aspecto `lookahead`): el trabajo de las próximas semanas con
+  sus restricciones, listas vs restringidas, y PPC contra el compromiso de la semana anterior (Last Planner).
+- **Disciplina de EDT**: `schedule_qa` revisa la regla del 100% (resúmenes vacíos, costo o recursos
+  en resúmenes, códigos EDT duplicados, resúmenes con un solo hijo); el formato `wbs_dictionary` de
+  `project_export` escribe el diccionario de la EDT.
+
+La historia (cortes, compromisos, cambios) vive junto al cronograma en `<nombre>.hzpmo.json`, así
+sobrevive a cualquier herramienta que escriba el .mpp después.
+
 **Interoperabilidad** — `project_export` · `project_import` · `bim_link` · `bim_sync`
 
 CSV, JSON, MSPDI, XER y PMXML de Primavera, `.mpp` nativo, y un dataset con forma para Power BI. Las
@@ -113,9 +145,9 @@ importaciones planean antes de escribir.
 
 ### Lo que cuesta tenerlo cargado
 
-Las 25 herramientas presentan unos **8.400 tokens** de esquema, en cada prompt, mientras el servidor
+Las 26 herramientas presentan unos **10.400 tokens** de esquema, en cada prompt, mientras el servidor
 esté conectado. Ese es el precio honesto de la superficie y conviene saberlo antes de decidir
-cargarla. Es también la razón de que se quedara en 25: la alternativa más grande trae 79
+cargarla. Es también la razón de que se mantenga cerca de 25: la alternativa más grande trae 79
 herramientas, y pasado cierto punto un agente no sostiene su propia superficie en la cabeza lo
 suficiente para elegir bien dentro de ella.
 
@@ -214,7 +246,7 @@ que corre en macOS, Linux y los Windows sin Project.
 
 ```bash
 cd src/HorizunMsProjectMcp && dotnet build && cd ../..
-python tools/acceptance-test.py   # 65 chequeos, las 25 herramientas de punta a punta
+python tools/acceptance-test.py   # 65 chequeos, todas las herramientas de punta a punta
 python tools/scheduler-test.py    # 45 chequeos, corrección del motor de ruta crítica
 python tools/planning-test.py     # 52 chequeos, reprogramación y aprendizaje
 python tools/robustness-test.py   # 34 chequeos, concurrencia y entrada hostil

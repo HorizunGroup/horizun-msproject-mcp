@@ -404,6 +404,44 @@ public static class Dcma14
             };
         }
 
+        // The WBS itself. PMBOK's 100% rule: the children of a summary are the whole of its work, and
+        // nothing is recorded on the summary that is not in its children.
+        var summaries = project.Tasks
+            .Where(t => t.UniqueID is not null && t.Summary && (t.ID ?? 0) != 0)
+            .ToList();
+        var allTasks = Math.Max(summaries.Count + leaves.Count, 1);
+        var emptySummaries = summaries.Where(t => t.ChildTasks.Count == 0).ToList();
+        yield return Ratio(
+            "hrz_wbs_empty_summary", "Summary tasks with no work under them",
+            emptySummaries.Count, allTasks, 0, emptySummaries,
+            "A WBS element with no children has no scope. Decompose it or remove it.");
+
+        var loadedSummaries = summaries
+            .Where(t => (t.FixedCost ?? 0) > 0 || t.ResourceAssignments.Any(a => a.Resource is not null))
+            .ToList();
+        yield return Ratio(
+            "hrz_wbs_summary_loaded", "Summary tasks carrying their own cost or resources",
+            loadedSummaries.Count, allTasks, 0, loadedSummaries,
+            "Work and cost belong on the tasks that do the work; on a summary they sit outside the 100% rule "
+            + "and are counted twice or not at all.");
+
+        var duplicateWbs = project.Tasks
+            .Where(t => t.UniqueID is not null && (t.ID ?? 0) != 0 && !string.IsNullOrWhiteSpace(t.WBS))
+            .GroupBy(t => t.WBS!.Trim())
+            .Where(g => g.Count() > 1)
+            .SelectMany(g => g)
+            .ToList();
+        yield return Ratio(
+            "hrz_wbs_duplicate_code", "Tasks sharing a WBS code",
+            duplicateWbs.Count, allTasks, 0, duplicateWbs,
+            "Every WBS element needs a code of its own, or cost and progress cannot be rolled up by it.");
+
+        var single = summaries.Where(t => t.ChildTasks.Count == 1).ToList();
+        yield return Ratio(
+            "hrz_wbs_single_child", "Summary tasks with a single child",
+            single.Count, allTasks, 5, single,
+            "A summary with one child decomposes nothing; merge the levels or finish the decomposition.");
+
         // The link to the budget — and therefore to BIM and to the cost model.
         if (!string.IsNullOrWhiteSpace(budgetCodeField))
         {

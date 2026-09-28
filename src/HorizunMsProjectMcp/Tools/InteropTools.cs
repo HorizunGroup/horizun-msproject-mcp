@@ -105,6 +105,31 @@ public static class InteropTools
                 return new ExportResult { Format = "csv", Path = full, Rows = tasks.Count };
             }
 
+            case "wbs_dictionary":
+            {
+                // The WBS dictionary: every element of the breakdown, summaries included, with what it
+                // costs, who does it, when, and the notes that describe its scope.
+                var rows = project.Tasks.Where(t => t.UniqueID is not null && (t.ID ?? 0) != 0).ToList();
+                var csv = new StringBuilder();
+                csv.AppendLine("wbs,outlineLevel,uid,name,type,start,finish,durationDays,baselineFinish,cost,"
+                               + "workHours,resources,notes");
+                foreach (var t in rows)
+                {
+                    var dto = MpxjMapper.ToDto(t, true);
+                    var resources = string.Join("; ", t.ResourceAssignments
+                        .Where(a => a.Resource is not null).Select(a => a.Resource!.Name).Distinct());
+                    csv.AppendLine(string.Join(',',
+                        Csv(t.WBS), t.OutlineLevel ?? 0, dto.Uid, Csv(new string(' ', Math.Max(0, (t.OutlineLevel ?? 1) - 1) * 2) + dto.Name),
+                        t.Summary ? "summary" : t.Milestone ? "milestone" : "task",
+                        Csv(dto.Start), Csv(dto.Finish), Csv(dto.Duration), Csv(dto.BaselineFinish),
+                        dto.Cost?.ToString("0.##") ?? "", dto.WorkHours?.ToString("0.##") ?? "",
+                        Csv(resources), Csv(t.Notes?.ReplaceLineEndings(" "))));
+                }
+
+                File.WriteAllText(full, csv.ToString());
+                return new ExportResult { Format = "wbs_dictionary", Path = full, Rows = rows.Count };
+            }
+
             case "json":
             {
                 var tasks = ScheduleAnalyzer.Leaves(project).Select(t => MpxjMapper.ToDto(t, true)).ToList();
@@ -156,7 +181,7 @@ public static class InteropTools
 
             default:
                 throw new McpToolException(
-                    $"Unknown format '{format}'. Use csv, json, pbip_dataset, or any format project_save "
+                    $"Unknown format '{format}'. Use csv, wbs_dictionary, json, pbip_dataset, or any format project_save "
                     + "writes: mspdi, mpx, mpp, xer, pmxml, planner, sdef.");
         }
     }

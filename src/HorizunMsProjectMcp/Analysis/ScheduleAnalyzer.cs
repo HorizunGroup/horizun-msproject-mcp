@@ -12,6 +12,9 @@ public sealed record ScheduleAnalysis
     public IReadOnlyList<OverallocationWindow>? Overallocation { get; init; }
     public IReadOnlyList<MilestoneStatus>? Milestones { get; init; }
     public DependencyHealth? DependencyHealth { get; init; }
+    public StatusReport? StatusReport { get; init; }
+    public LookaheadReport? Lookahead { get; init; }
+    public IReadOnlyList<ChangeEntry>? ChangeLog { get; init; }
 }
 
 public sealed record CriticalPathReport

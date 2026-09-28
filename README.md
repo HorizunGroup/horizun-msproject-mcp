@@ -5,6 +5,13 @@
 **An MCP server for Microsoft Project that needs neither Java nor Microsoft Project — and tells you
 the truth about what it wrote.**
 
+**It works as a PMO, not as a software operator.** It does not just click through Microsoft Project
+on your behalf: it plans, controls and reports the way a project management office does, following
+PMBOK — a WBS that obeys the 100% rule, a cost-loaded baseline, earned value and earned schedule,
+quantitative schedule risk, formal change control with reasons and approvers, weekly look-ahead
+planning with PPC, and a period status report with its trend. Project is the engine; the method is
+the product.
+
 *[Español](README.es.md)*
 
 <!-- mcp-name: io.github.HorizunGroup/horizun-msproject-mcp -->
@@ -60,7 +67,7 @@ licensed Microsoft Project install, or a paid JDBC driver — and on the machine
 
 ---
 
-## The 25 tools
+## The 26 tools
 
 **Session** — `project_health` · `project_open` · `project_save`
 
@@ -114,6 +121,29 @@ activity to itself unit after unit but never to the trades around it, both tools
 number: the library reports how many activities learned a predecessor other than themselves, and the
 draft reports how many trades it left with nothing scheduled before them.
 
+**Project control** — `schedule_risk`, plus PMO aspects of the tools above
+
+- **Quantitative schedule risk** (`schedule_risk`): Monte Carlo over the network's own logic, all four
+  link types and lags, with three-point ranges per task or a default spread. P10/P50/P80/P90 finish,
+  probability of a target and of the baseline, P80 contingency, risk drivers by criticality and
+  sensitivity. Seeded runs repeat exactly.
+- **Period status report** (`schedule_analyze` aspect `status_report`): planned vs earned, SPI, CPI,
+  earned-schedule SPI(t), EAC by three methods, TCPI, forecast finish, milestones at risk, top
+  issues, and the trend of every recorded cut-off.
+- **Cost-loaded schedule** (`schedule_update` op `load_budget`): a budget by code, the same code BIM
+  links on, spread over the tasks as cost; lines no task carries are reported. `timephased_query`
+  measure `s_curve` returns cumulative PV, EV and AC, in money when costs are loaded.
+- **Integrated change control**: a rebaseline needs a `reason` (and takes `approvedBy`); every
+  baseline, budget load and committed edit batch is logged with its finish impact (aspect `change_log`).
+- **Short-interval planning** (aspect `lookahead`): the next weeks' work with each task's constraints,
+  ready vs constrained, and PPC against last week's recorded commitment (Last Planner).
+- **WBS discipline**: `schedule_qa` checks the 100% rule (empty summaries, cost or resources on
+  summaries, duplicate WBS codes, single-child summaries); `project_export` format `wbs_dictionary`
+  writes the WBS dictionary.
+
+The history (cut-offs, commitments, changes) lives beside the schedule in `<name>.hzpmo.json`, so it
+survives whichever tool writes the .mpp next.
+
 **Interop** — `project_export` · `project_import` · `bim_link` · `bim_sync`
 
 CSV, JSON, MSPDI, Primavera XER and PMXML, native `.mpp`, and a shaped Power BI dataset. Imports
@@ -121,9 +151,9 @@ plan before they write.
 
 ### What it costs to have loaded
 
-The 25 tools present about **8,400 tokens** of schema, in every prompt, for as long as the server is
+The 26 tools present about **10,400 tokens** of schema, in every prompt, for as long as the server is
 connected. That is the honest price of the surface and it is worth knowing before choosing to carry
-it. It is also why the surface stayed at 25: the largest alternative ships 79 tools, and past a
+it. It is also why the surface stays near 25: the largest alternative ships 79 tools, and past a
 point an agent cannot hold the surface in its head well enough to choose correctly within it.
 
 ---
@@ -258,7 +288,7 @@ can do.
 
 ```bash
 cd src/HorizunMsProjectMcp && dotnet build && cd ../..
-python tools/acceptance-test.py   # 65 checks, all 25 tools end to end
+python tools/acceptance-test.py   # 65 checks, all tools end to end
 python tools/scheduler-test.py    # 45 checks, critical-path engine correctness
 python tools/planning-test.py     # 52 checks, reprogramming and learning
 python tools/robustness-test.py   # 34 checks, concurrency and hostile input
@@ -327,7 +357,7 @@ src/HorizunMsProjectMcp/
   Bim/           element matching and the 4D bridge
   Tools/         the 25 MCP tools
 tools/
-  acceptance-test.py   end-to-end across all 25 tools, 65 checks
+  acceptance-test.py   end-to-end across all tools, 65 checks
   scheduler-test.py    engine correctness, format round trips, safety guards, 45 checks
   planning-test.py     recovery, sequencing, target dates, learning, generation, 52 checks
   robustness-test.py   concurrency, malformed input, resource limits, 34 checks
