@@ -32,6 +32,8 @@ public static class Dcma14
     private const double HighFloatDays = 44;
     private const double HighDurationDays = 44;
 
+    private static bool IsMilestone(MPXJ.Net.Task t) => t.Milestone || MpxjMapper.Days(t.Duration) is 0;
+
     public static QaReport Run(
         ProjectFile project,
         DateTime statusDate,
@@ -62,8 +64,21 @@ public static class Dcma14
         }
 
         // ---- 1. Logic: every task needs a predecessor and a successor ----
-        var noPred = leaves.Where(t => t.Predecessors.Count == 0).ToList();
-        var noSucc = leaves.Where(t => t.Successors.Count == 0).ToList();
+        // Except the two ends of the network, as the standard says: the project's start milestone has
+        // nothing before it and its finish milestone nothing after it, by definition.
+        var firstStart = leaves.Where(t => t.Start is not null).Min(t => t.Start);
+        var startMilestones = leaves.Where(t => IsMilestone(t) && t.Predecessors.Count == 0
+                                                && t.Start is not null && t.Start <= firstStart).ToList();
+        var finishMilestones = leaves.Where(t => IsMilestone(t) && t.Successors.Count == 0
+                                                 && t.Finish is not null && t.Finish >= lastFinish).ToList();
+        var noPred = leaves.Where(t => t.Predecessors.Count == 0 && !startMilestones.Contains(t)).ToList();
+        var noSucc = leaves.Where(t => t.Successors.Count == 0 && !finishMilestones.Contains(t)).ToList();
+        if (startMilestones.Count + finishMilestones.Count > 0)
+        {
+            reportNotes.Add("Check 1 does not count the project's start and finish milestones as missing logic: uids "
+                            + string.Join(", ", startMilestones.Concat(finishMilestones).Select(t => t.UniqueID)) + ".");
+        }
+
         var danglers = noPred.Concat(noSucc).DistinctBy(t => t.UniqueID).ToList();
         findings.Add(Ratio(
             "dcma_01_logic", "Missing logic (no predecessor or no successor)",

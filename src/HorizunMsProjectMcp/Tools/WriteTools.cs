@@ -470,7 +470,7 @@ public static class WriteTools
         {
             SetDate(task, op.ActualStart, "actualStart", (t, d) => t.ActualStart = d, t => t.ActualStart, uid, pending, rejected);
         }
-        SetDate(task, op.ActualFinish, "actualFinish", (t, d) => t.ActualFinish = d, t => t.ActualFinish, uid, pending, rejected);
+        SetActualFinish(project, task, op, uid, pending, rejected);
         SetDate(task, op.Deadline, "deadline", (t, d) => t.Deadline = d, t => t.Deadline, uid, pending, rejected);
         SetDate(task, op.ConstraintDate, "constraintDate", (t, d) => t.ConstraintDate = d, t => t.ConstraintDate, uid, pending, rejected);
 
@@ -621,6 +621,65 @@ public static class WriteTools
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// An actual finish moves the task's finish and duration with it, as in Project — and so does a new
+    /// actual start on a task already finished. A date with no time is the end of that working day,
+    /// which is what Project takes from a date typed into Actual Finish.
+    /// </summary>
+    private static void SetActualFinish(
+        ProjectFile project, MPXJ.Net.Task task, TaskOp op, int uid, PendingOp pending, List<RejectedWrite> rejected)
+    {
+        if (op.ActualFinish is null)
+        {
+            if (op.ActualStart is not null && task.ActualStart is not null && task.ActualFinish is not null)
+            {
+                Writes.ProgressRules.ActualFinishChanged(project, task);
+            }
+
+            return;
+        }
+
+        if (QueryTools.ParseDate(op.ActualFinish) is not { } finish)
+        {
+            return;
+        }
+
+        if (task.Summary)
+        {
+            rejected.Add(WriteEngine.Reject(uid, "actualFinish", op.ActualFinish, MpxjMapper.Iso(task.ActualFinish),
+                WriteEngine.DateRejectionReason(task, "actualFinish")));
+            return;
+        }
+
+        if (finish.TimeOfDay == TimeSpan.Zero)
+        {
+            finish = new Analysis.CalendarSet(project).For(task).FinishOn(finish);
+        }
+
+        var start = task.ActualStart ?? task.Start;
+        if (start is not null && finish < start)
+        {
+            rejected.Add(WriteEngine.Reject(uid, "actualFinish", op.ActualFinish, MpxjMapper.Iso(task.ActualFinish),
+                $"The actual finish is before the task's {(task.ActualStart is null ? "start" : "actual start")} "
+                + $"({MpxjMapper.Iso(start)}); Microsoft Project refuses it too. Record the actual start first."));
+            return;
+        }
+
+        task.ActualFinish = finish;
+        Writes.ProgressRules.ActualFinishChanged(project, task);
+        var duration = task.Duration;
+        pending.Checks.Add(file =>
+        {
+            var check = file.GetTaskByUniqueID(uid);
+            return check?.ActualFinish is { } af && Math.Abs((af - finish).TotalMinutes) < 1
+                   && check.Finish is { } f && Math.Abs((f - finish).TotalMinutes) < 1
+                   && Math.Abs((MpxjMapper.Days(check.Duration) ?? -1) - (MpxjMapper.Days(duration) ?? -2)) < 0.01
+                ? null
+                : WriteEngine.Reject(uid, "actualFinish", op.ActualFinish, MpxjMapper.Iso(check?.ActualFinish),
+                    "The actual finish, or the finish and duration it sets, did not survive the write.");
+        });
     }
 
     private static void SetDate(

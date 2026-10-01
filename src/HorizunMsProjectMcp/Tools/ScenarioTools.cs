@@ -36,6 +36,19 @@ public sealed record ScenarioOutcome
     public double PeakLoadPercentOfCapacity { get; init; }
     public int CriticalTasks { get; init; }
     public int Applied { get; init; }
+
+    /// <summary>Task-hours scheduled, from the status date on, in working time this scenario adds to the
+    /// calendars (Saturdays, longer days) — the hours a premium is paid on.</summary>
+    public double ExtraTimeHours { get; init; }
+
+    /// <summary>Those hours at extraTimeCostPerHour, already in Cost; null when no rate was given.</summary>
+    public double? ExtraTimeCost { get; init; }
+
+    /// <summary>False when the scenario adds working time and no rate was given to price it: the cost
+    /// shown leaves the premium out and must not be read as "costs nothing more".</summary>
+    public bool ExtraTimeValued { get; init; } = true;
+
+    public string? CostNote { get; init; }
     public IReadOnlyList<RejectedWrite> Rejected { get; init; } = Array.Empty<RejectedWrite>();
 }
 
@@ -70,7 +83,12 @@ public static class ScenarioTools
         + "peak load, critical task count, and anything a scenario asked for that was refused.")]
     public static ScenarioComparison ScheduleScenarios(
         [Description("Document handle from project_open.")] string handle,
-        [Description("The scenarios to compare (1-8).")] Scenario[] scenarios)
+        [Description("The scenarios to compare (1-8).")] Scenario[] scenarios,
+        [Description(
+            "Premium for working time a scenario adds to the calendars (Saturdays, longer days), per task-hour "
+            + "— the surcharge a crew costs on top of what the schedule already prices. Omit it and such "
+            + "scenarios are marked not valued (extraTimeValued=false) instead of showing a cost change of 0.")]
+        double? extraTimeCostPerHour = null)
     {
         return SessionStore.Use(handle, session =>
         {
@@ -83,7 +101,7 @@ public static class ScenarioTools
             // — otherwise the differences would be the engine's, not the scenario's.
             var reference = MpxjBackend.Clone(session.File);
             var engine = Scheduler.Run(reference).Engine;
-            var current = Measure("current", reference, null, 0, Array.Empty<RejectedWrite>());
+            var current = Measure("current", reference, null, 0, Array.Empty<RejectedWrite>(), null, null);
 
             var outcomes = new List<ScenarioOutcome>();
             foreach (var scenario in scenarios)
@@ -112,7 +130,7 @@ public static class ScenarioTools
                 }
 
                 Scheduler.Run(copy);
-                outcomes.Add(Measure(scenario.Name, copy, current, applied, rejected));
+                outcomes.Add(Measure(scenario.Name, copy, current, applied, rejected, reference, extraTimeCostPerHour));
             }
 
             return new ScenarioComparison
@@ -124,18 +142,26 @@ public static class ScenarioTools
                 {
                     "Nothing was committed. Apply a scenario with the write tools, passing the same operations.",
                     "Cost is the sum of detail-task cost as the schedule computes it: resource rates, fixed costs "
-                    + "and materials. Overtime is not priced unless the resources carry an overtime rate.",
+                    + "and materials"
+                    + (extraTimeCostPerHour is { } rate
+                        ? $", plus {rate:0.##} per task-hour worked in time a scenario adds to the calendars (extraTimeHours)."
+                        : ". Working time a scenario adds (Saturdays, longer days) is counted in extraTimeHours but not "
+                          + "priced: such a scenario says extraTimeValued=false. Pass extraTimeCostPerHour to price it."),
                 },
             };
         });
     }
 
     private static ScenarioOutcome Measure(
-        string name, ProjectFile project, ScenarioOutcome? against, int applied, IReadOnlyList<RejectedWrite> rejected)
+        string name, ProjectFile project, ScenarioOutcome? against, int applied, IReadOnlyList<RejectedWrite> rejected,
+        ProjectFile? reference, double? extraTimeCostPerHour)
     {
         var finish = MpxjBackend.ProjectFinish(project);
         var leaves = ScheduleAnalyzer.Leaves(project).ToList();
-        var cost = Math.Round(leaves.Sum(Writes.Costs.Of), 2);
+        var extraHours = reference is null ? 0 : Math.Round(ExtraTimeHours(project, reference, leaves), 1);
+        var valued = extraHours <= 0 || extraTimeCostPerHour is not null;
+        double? extraCost = extraHours > 0 && extraTimeCostPerHour is { } rate ? Math.Round(extraHours * rate, 2) : null;
+        var cost = Math.Round(leaves.Sum(Writes.Costs.Of) + (extraCost ?? 0), 2);
         var windows = ResourceAnalyzer.Find(project);
         var calendar = new WorkingCalendar(project);
         double? delta = null;
@@ -155,7 +181,53 @@ public static class ScenarioTools
             PeakLoadPercentOfCapacity = windows.Count == 0 ? 0 : Math.Round(windows.Max(w => w.PeakUnits / Math.Max(w.MaxUnits, 1) * 100), 1),
             CriticalTasks = leaves.Count(t => t.Critical),
             Applied = applied,
+            ExtraTimeHours = extraHours,
+            ExtraTimeCost = extraCost,
+            ExtraTimeValued = valued,
+            CostNote = valued ? null
+                : $"NOT VALUED: {extraHours:0.#} task-hour(s) fall in working time this scenario adds, and their premium is "
+                  + "not in the cost. Pass extraTimeCostPerHour to price it.",
             Rejected = rejected,
         };
+    }
+
+    /// <summary>
+    /// Task-hours from the status date on that fall in working time the scenario's calendars have and
+    /// the reference's do not, day by day over each task's span.
+    /// </summary>
+    private static double ExtraTimeHours(ProjectFile scenario, ProjectFile reference, IReadOnlyList<MPXJ.Net.Task> leaves)
+    {
+        var from = scenario.ProjectProperties.StatusDate ?? scenario.ProjectProperties.StartDate ?? DateTime.MinValue;
+        var mine = new CalendarSet(scenario);
+        var theirs = new CalendarSet(reference);
+        double total = 0;
+        foreach (var task in leaves)
+        {
+            if ((task.PercentageComplete ?? 0) >= 100 || task.Start is not { } start || task.Finish is not { } end
+                || task.UniqueID is not { } uid || reference.GetTaskByUniqueID(uid) is not { } before)
+            {
+                continue;
+            }
+
+            var now = mine.For(task);
+            var then = theirs.For(before);
+            for (var day = (start > from ? start : from).Date; day <= end.Date; day = day.AddDays(1))
+            {
+                var open = day < start ? start : day;
+                var close = day.AddDays(1) > end ? end : day.AddDays(1);
+                if (close <= open)
+                {
+                    continue;
+                }
+
+                var added = now.WorkingHoursBetween(open, close) - then.WorkingHoursBetween(open, close);
+                if (added > 0)
+                {
+                    total += added;
+                }
+            }
+        }
+
+        return total;
     }
 }

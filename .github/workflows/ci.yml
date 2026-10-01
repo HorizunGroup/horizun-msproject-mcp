@@ -75,6 +75,9 @@ jobs:
       - name: What the 2026-09-30 end-to-end dry run found
         run: python tools/field-report-test.py
 
+      - name: What the Comité de obra exercise found
+        run: python tools/comite-obra-test.py
+
       # Hosted runners have no Microsoft Project, so this reports itself skipped here. It is run
       # locally, on a machine with Project, before every release (see CONTRIBUTING.md).
       - name: Microsoft Project as the scheduling engine
@@ -154,3 +157,6 @@ jobs:
 
       - name: What the 2026-09-30 end-to-end dry run found
         run: python tools/field-report-test.py
+
+      - name: What the Comité de obra exercise found
+        run: python tools/comite-obra-test.py

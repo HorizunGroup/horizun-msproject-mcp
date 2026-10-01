@@ -65,6 +65,7 @@ jobs:
           python tools/imported-file-test.py
           python tools/planner-features-test.py
           python tools/field-report-test.py
+          python tools/comite-obra-test.py
           python tools/project-engine-test.py
 
       - name: Pack

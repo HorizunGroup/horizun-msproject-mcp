@@ -18,6 +18,7 @@ public sealed record GenerateResult
     public string? Finish { get; init; }
     public required IReadOnlyList<string> Unmatched { get; init; }
     public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string>? SequenceWarnings { get; init; }
 }
 
 [McpServerToolType]
@@ -647,6 +648,7 @@ public static class PlanningTools
             Finish = report.ProjectFinish,
             Unmatched = Array.Empty<string>(),
             Notes = notes,
+            SequenceWarnings = built.SequenceWarnings.Count > 0 ? built.SequenceWarnings : null,
         };
     }
 

@@ -13,6 +13,10 @@ public sealed record LateTask
     public double? PercentComplete { get; init; }
     public required double SlipDays { get; init; }
     public double? TotalFloatDays { get; init; }
+
+    /// <summary>The share of the task the plan expected done by the status date, when progress is
+    /// measured against it ('behind_plan').</summary>
+    public double? PlannedPercent { get; init; }
     public required bool OnCriticalPath { get; init; }
     public required int SuccessorsBlocked { get; init; }
 }
@@ -43,6 +47,13 @@ public sealed record RecoveryReport
     public string? TargetFinish { get; init; }
     public double? DaysBehindTarget { get; init; }
     public required int LateCount { get; init; }
+
+    /// <summary>What lateness is measured against: "baseline" when one is saved, else "current plan".</summary>
+    public string MeasuredAgainst { get; init; } = "current plan";
+
+    /// <summary>The schedule performance index at the status date, as baseline_compare reports it, so the
+    /// late list and earned value can be read side by side.</summary>
+    public double? Spi { get; init; }
     public required double WorstSlipDays { get; init; }
     public required IReadOnlyList<LateTask> Late { get; init; }
     public required IReadOnlyList<RecoveryOption> Options { get; init; }
@@ -77,6 +88,8 @@ public static class RecoveryPlanner
         var forecast = MpxjBackend.ProjectFinish(project);
 
         var late = FindLate(project, leaves, statusDate);
+        var hasBaseline = leaves.Any(t => t.BaselineFinish is not null);
+        var evm = EarnedValue.Compare(project, statusDate, 0, byBranch: false).Project;
 
         double? behind = null;
         if (targetFinish is not null && forecast is not null)
@@ -88,11 +101,24 @@ public static class RecoveryPlanner
         var options = BuildOptions(project, leaves, statusDate, maxOptions, notes);
         var review = Analysis.ReplanReview.Review(project, statusDate);
 
-        if (late.Count == 0)
+        if (late.Count == 0 && evm.Spi is < 1)
+        {
+            notes.Add(
+                $"No single task is behind its {(hasBaseline ? "baseline" : "plan")} dates as of {statusDate:yyyy-MM-dd}, "
+                + $"yet earned value reads SPI {evm.Spi:0.###}: the shortfall is spread thinly across work in progress.");
+        }
+        else if (late.Count == 0)
         {
             notes.Add(
                 $"Nothing is behind as of {statusDate:yyyy-MM-dd}. Either the work is on plan or no "
                 + "progress has been recorded — schedule_qa reports which.");
+        }
+
+        if (!hasBaseline)
+        {
+            notes.Add("No baseline is saved, so lateness is measured against the current plan, which moves with every "
+                      + "reschedule: work pushed forward by a slip never shows as late. Save a baseline "
+                      + "(schedule_update op='save_baseline') to measure against what was agreed.");
         }
 
         if (behind is <= 0)
@@ -107,6 +133,8 @@ public static class RecoveryPlanner
             TargetFinish = targetFinish is null ? null : targetFinish.Value.ToString("yyyy-MM-dd"),
             DaysBehindTarget = behind,
             LateCount = late.Count,
+            MeasuredAgainst = hasBaseline ? "baseline" : "current plan",
+            Spi = evm.Spi,
             WorstSlipDays = late.Count == 0 ? 0 : late.Max(l => l.SlipDays),
             Late = late.Take(100).ToList(),
             Options = options,
@@ -118,9 +146,16 @@ public static class RecoveryPlanner
     }
 
     /// <summary>
-    /// Work that should have started or finished by the status date and has not. Ordered by how
-    /// much of the schedule is stuck behind it, because that is what decides where to intervene.
+    /// Work that should have started or finished by the status date and has not, or is in progress
+    /// with less done than planned. Ordered by how much of the schedule is stuck behind it, because
+    /// that is what decides where to intervene.
     /// </summary>
+    /// <remarks>
+    /// "Should have" is the baseline wherever the task has one — the plan earned value measures SPI
+    /// against. Measured against the current dates instead, nothing is ever late once the schedule is
+    /// recalculated: a reschedule moves every unfinished task past the status date, and a field run
+    /// reported "nothing is behind" beside an SPI of 0.818 on the same cut.
+    /// </remarks>
     public static List<LateTask> FindLate(
         ProjectFile project, IReadOnlyList<MPXJ.Net.Task> leaves, DateTime statusDate)
     {
@@ -135,18 +170,34 @@ public static class RecoveryPlanner
                 continue;
             }
 
+            var plannedStart = task.BaselineStart ?? task.Start;
+            var plannedFinish = task.BaselineFinish ?? task.Finish;
             string? kind = null;
             double slip = 0;
+            double? plannedPercent = null;
 
-            if (task.Finish is { } finish && finish < statusDate)
+            if (plannedFinish is { } finish && finish < statusDate)
             {
                 kind = percent > 0 ? "overrunning" : "not_finished";
-                slip = calendar.WorkingDaysBetween(finish, statusDate);
+                slip = calendar.WorkingDaysBetween(finish, Later(task.Finish, statusDate));
             }
-            else if (task.Start is { } start && start < statusDate && percent <= 0 && task.ActualStart is null)
+            else if (plannedStart is { } start && start < statusDate && percent <= 0 && task.ActualStart is null)
             {
                 kind = "not_started";
-                slip = calendar.WorkingDaysBetween(start, statusDate);
+                slip = calendar.WorkingDaysBetween(start, Later(task.Start, statusDate));
+            }
+            else if (percent > 0 && plannedStart is { } from && plannedFinish is { } to && to > from)
+            {
+                // In progress, but less of it done than the plan expected by now.
+                var planned = calendar.WorkingHoursBetween(from, statusDate) / Math.Max(1e-9, calendar.WorkingHoursBetween(from, to));
+                planned = Math.Clamp(planned, 0, 1) * 100;
+                var days = MpxjMapper.Days(task.BaselineDuration ?? task.Duration, calendar.HoursPerDay) ?? 0;
+                if (planned - percent >= 1 && days > 0)
+                {
+                    kind = "behind_plan";
+                    plannedPercent = Math.Round(planned);
+                    slip = (planned - percent) / 100.0 * days;
+                }
             }
 
             if (kind is null || slip <= 0)
@@ -159,9 +210,10 @@ public static class RecoveryPlanner
                 Uid = task.UniqueID!.Value,
                 Name = task.Name,
                 Kind = kind,
-                PlannedStart = MpxjMapper.Iso(task.Start),
-                PlannedFinish = MpxjMapper.Iso(task.Finish),
+                PlannedStart = MpxjMapper.Iso(plannedStart),
+                PlannedFinish = MpxjMapper.Iso(plannedFinish),
                 PercentComplete = percent,
+                PlannedPercent = plannedPercent,
                 SlipDays = Math.Round(slip, 1),
                 TotalFloatDays = MpxjMapper.Days(task.TotalSlack),
                 OnCriticalPath = task.Critical,
@@ -175,6 +227,9 @@ public static class RecoveryPlanner
             .ThenByDescending(l => l.SlipDays)
             .ToList();
     }
+
+    private static DateTime Later(DateTime? forecast, DateTime statusDate) =>
+        forecast is { } f && f > statusDate ? f : statusDate;
 
     /// <summary>How much of the network sits downstream of a task — its blast radius.</summary>
     internal static int CountDownstream(ProjectFile project, int uid)

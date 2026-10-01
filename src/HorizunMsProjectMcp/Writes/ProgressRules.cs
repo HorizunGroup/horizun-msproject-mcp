@@ -165,6 +165,35 @@ public static class ProgressRules
     }
 
     /// <summary>
+    /// An actual finish recorded on a task, as Project applies it: the task is finished, its actual
+    /// start is the scheduled start if none was recorded, its dates are the actual ones and its
+    /// duration is the working time between them on the task's calendar — all of it actual. A task
+    /// finished five days late is five days longer, not a task that still ends on its planned date.
+    /// </summary>
+    public static void ActualFinishChanged(ProjectFile project, MPXJ.Net.Task task)
+    {
+        if (task.Summary || task.ActualFinish is not { } finish)
+        {
+            return;
+        }
+
+        var start = task.ActualStart ?? task.Start ?? finish;
+        task.ActualStart = start;
+        task.Stop = null;
+        task.Resume = null;
+
+        var hours = HoursPerDay(project);
+        var calendar = new Analysis.CalendarSet(project).For(task);
+        var worked = Math.Max(0, calendar.WorkingHoursBetween(start, finish)) / hours;
+
+        task.Start = start;
+        task.Finish = finish;
+        task.Duration = Minutes(worked, hours);
+        ResizeAssignments(task, hours);
+        Set(task, hours, worked, worked, 100);
+    }
+
+    /// <summary>
     /// Rolls progress up to every summary the way Project does: the actual duration of all the detail
     /// tasks beneath it over their total duration. Inferred from real schedules rather than assumed —
     /// it reproduced Project's figure on 11 of 11 summaries, where using only the immediate children
