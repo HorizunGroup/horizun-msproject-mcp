@@ -31,6 +31,8 @@ public sealed record WeeklyCommitment
 /// <summary>An entry in the change log: a rebaseline, a budget load, or a committed batch of edits.</summary>
 public sealed record ChangeEntry
 {
+    /// <summary>The unit of every day figure in this report.</summary>
+    public string DayUnit { get; init; } = Horizun.ProjectMcp.Model.DayUnits.Working;
     public required string Kind { get; init; }
     public required string Summary { get; init; }
     public string? Reason { get; init; }
@@ -119,7 +121,7 @@ public static class ValueWeights
 {
     public static (string Measure, Dictionary<int, double> Budget) For(ProjectFile project, IReadOnlyList<MPXJ.Net.Task> leaves)
     {
-        var hasCost = leaves.Any(t => (t.BaselineCost ?? 0) > 0 || (t.Cost ?? 0) > 0);
+        var hasCost = leaves.Any(t => (t.BaselineCost ?? 0) > 0 || Writes.Costs.Of(t) > 0);
         var hasWork = leaves.Any(t => (MpxjMapper.Hours(t.Work) ?? 0) > 0);
         var measure = hasCost ? "cost" : hasWork ? "work_hours" : "duration_days";
         var budget = new Dictionary<int, double>();
@@ -127,7 +129,7 @@ public static class ValueWeights
         {
             budget[t.UniqueID!.Value] = measure switch
             {
-                "cost" => Convert.ToDouble(t.BaselineCost ?? t.Cost ?? 0),
+                "cost" => t.BaselineCost is { } planned ? Convert.ToDouble(planned) : Writes.Costs.Of(t),
                 "work_hours" => MpxjMapper.Hours(t.BaselineWork) ?? MpxjMapper.Hours(t.Work) ?? 0,
                 _ => MpxjMapper.Days(t.BaselineDuration) ?? MpxjMapper.Days(t.Duration) ?? 0,
             };

@@ -46,6 +46,12 @@ public static class ComBridge
             {
                 host.Open(staging, token);
                 host.ApplyProgress(token, project.ProjectProperties.StatusDate, progress);
+                var resumes = Analysis.ProjectScheduler.PendingResumes(project);
+                if (resumes.Count > 0)
+                {
+                    host.ApplyResumes(token, resumes);
+                    host.Calculate(token);
+                }
                 host.SaveMpp(token, candidate);
                 host.Close(token);
                 return 0;

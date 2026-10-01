@@ -150,6 +150,22 @@ public static class CpmScheduler
             {
                 node.EarlyFinish = cal.PreviousWorkingDay(task.ActualFinish.Value);
             }
+            else if (Writes.ProgressRules.PendingResume(task) is { } resume)
+            {
+                // Remaining work moved past the status date: it runs from there.
+                var remaining = MpxjMapper.Days(task.RemainingDuration, cal.HoursPerDay)
+                                ?? node.DurationDays * (1 - (task.PercentageComplete ?? 0) / 100.0);
+                var resumed = remaining <= 0
+                    ? cal.NextWorkingDay(resume)
+                    : cal.AddWorkingDays(cal.NextWorkingDay(resume), remaining);
+                if (resumed > node.EarlyFinish)
+                {
+                    node.EarlyFinish = resumed;
+                    // The span it now occupies, gap included, so the backward pass measures float
+                    // from where it really finishes.
+                    node.DurationDays = cal.WorkingDaysBetween(node.EarlyStart, node.EarlyFinish) + 1;
+                }
+            }
         }
 
         var projectFinish = nodes.Values.Max(n => n.EarlyFinish);

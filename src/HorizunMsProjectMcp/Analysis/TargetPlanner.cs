@@ -25,6 +25,8 @@ public sealed record DrivingLink
 
 public sealed record TargetReport
 {
+    /// <summary>The unit of every day figure in this report.</summary>
+    public string DayUnit { get; init; } = Horizun.ProjectMcp.Model.DayUnits.Working;
     public required string Target { get; init; }
     public required string Anchor { get; init; }
     public required string? ForecastFinish { get; init; }

@@ -328,9 +328,50 @@ public sealed class ProjectHost
                 + $"({ex.Message})");
         }
 
-        _opened[token] = FindByName(token) ?? throw new McpToolException(
-            "Microsoft Project opened the working copy but it could not be found among its documents.");
+        _opened[token] = FindOpened(token) ?? throw new McpToolException(
+            "Microsoft Project opened the working copy but it could not be found among its documents, "
+            + "even after waiting for it. Nothing was changed; try again — if it repeats, close any dialog "
+            + "Project is showing.");
         Activate(token);
+    }
+
+    /// <summary>
+    /// The document just opened, by name. Right after FileOpenEx returns, Project can still be busy
+    /// importing — its collection answers without the new document, or a name read is refused — and a
+    /// single look reported "could not be found" twice in a row on a real session. It is looked for
+    /// again for a few seconds, and the active document, which FileOpenEx makes the new one, is checked
+    /// too.
+    /// </summary>
+    private object? FindOpened(string token)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(8);
+        while (true)
+        {
+            try
+            {
+                if (FindByName(token) is { } found)
+                {
+                    return found;
+                }
+
+                if (TryGet(_app, "ActiveProject") is { } active
+                    && NameOf(active) is { } name && name.Contains(token, StringComparison.Ordinal))
+                {
+                    return active;
+                }
+            }
+            catch
+            {
+                // Busy: look again below.
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                return null;
+            }
+
+            Thread.Sleep(250);
+        }
     }
 
     /// <summary>Recalculates only our document. <c>CalculateAll</c> would recalculate every open
@@ -358,6 +399,45 @@ public sealed class ProjectHost
         // Positional: LevelNow has one argument, All, and without it Project levels only the selection.
         Call(_app, "LevelNow", true);
         Call(_app, "CalculateProject");
+    }
+
+    /// <summary>
+    /// Moves the remaining work of in-progress tasks to where reschedule_incomplete put it, by setting
+    /// each task's Resume — what Project's own "reschedule uncompleted work" does, to the minute
+    /// (measured). Project refuses it when the schedule does not split in-progress tasks; such a task
+    /// is returned, so the write that asked for it can say so instead of reporting it moved.
+    /// </summary>
+    public IReadOnlyList<int> ApplyResumes(string token, IReadOnlyList<(int Uid, DateTime Resume)> resumes)
+    {
+        var refused = new List<int>();
+        if (resumes.Count == 0)
+        {
+            return refused;
+        }
+
+        Activate(token);
+        var tasks = Get(_opened[token], "Tasks");
+        foreach (var (uid, resume) in resumes)
+        {
+            try
+            {
+                var task = tasks.GetType().InvokeMember(
+                    "UniqueID", BindingFlags.GetProperty, null, tasks, new object[] { uid });
+                if (task is null)
+                {
+                    refused.Add(uid);
+                    continue;
+                }
+
+                Set(task, "Resume", resume);
+            }
+            catch
+            {
+                refused.Add(uid);
+            }
+        }
+
+        return refused;
     }
 
     /// <summary>Saves our document as MSPDI. The format has to be passed positionally: with named

@@ -74,6 +74,7 @@ public static class EnvironmentDoctor
         // COM is the accelerator, not the floor: it is selected only when it has been
         // proven to start, which means only under a deep probe.
         var backend = project is { Available: true, Launched: true } ? Backend.Com : Backend.Mpxj;
+        var capabilities = DescribeCapabilities(backend, project);
 
         return new HealthReport
         {
@@ -84,8 +85,8 @@ public static class EnvironmentDoctor
             Runtime = DescribeRuntime(),
             Sessions = DescribeSessions(),
             MicrosoftProject = project,
-            Capabilities = DescribeCapabilities(backend, project),
-            Notes = BuildNotes(backend, project, deep),
+            Capabilities = capabilities,
+            Notes = BuildNotes(project, deep, capabilities),
         };
     }
 
@@ -147,7 +148,7 @@ public static class EnvironmentDoctor
         };
     }
 
-    private static List<string> BuildNotes(Backend backend, ComProbeResult project, bool deep)
+    private static List<string> BuildNotes(ComProbeResult project, bool deep, IReadOnlyDictionary<string, bool> capabilities)
     {
         var notes = new List<string>();
 
@@ -182,13 +183,36 @@ public static class EnvironmentDoctor
             notes.Add(project.Diagnosis);
         }
 
-        if (backend == Backend.Mpxj)
+        // Written from the matrix itself: a fixed sentence here said both "stay false" on a machine
+        // where the matrix, correctly, said both were true.
+        var mpp = capabilities.GetValueOrDefault("write_native_mpp");
+        var level = capabilities.GetValueOrDefault("level_resources");
+        if (mpp && level)
         {
             notes.Add(
-                "Two capabilities stay false here and will refuse rather than approximate: writing the "
-                + "native binary .mpp (only Microsoft Project can author it) and resource levelling "
-                + "(its heuristic is unpublished, so any imitation would be a different answer wearing "
-                + "the same name).");
+                "Native .mpp writing and resource levelling are both done by Microsoft Project itself: an .mpp "
+                + "is saved by Project and read back before it replaces the target, and levelling is Project's "
+                + "own leveller.");
+        }
+        else
+        {
+            var refused = new List<string>();
+            if (!mpp)
+            {
+                refused.Add("writing the native binary .mpp (only Microsoft Project can author it)");
+            }
+
+            if (!level)
+            {
+                refused.Add("resource levelling (its heuristic is unpublished, so any imitation would be a "
+                            + "different answer wearing the same name)");
+            }
+
+            notes.Add(
+                $"{(refused.Count == 1 ? "One capability is" : "Two capabilities are")} false here and will refuse "
+                + "rather than approximate: " + string.Join(", and ", refused) + "."
+                + (mpp ? " Native .mpp writing is available: Project saves it, and it is read back before it "
+                         + "replaces the target." : ""));
         }
 
         return notes;

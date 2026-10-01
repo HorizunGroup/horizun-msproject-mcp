@@ -41,6 +41,8 @@ public sealed record ScenarioOutcome
 
 public sealed record ScenarioComparison
 {
+    /// <summary>The unit of every day figure in this report.</summary>
+    public string DayUnit { get; init; } = Horizun.ProjectMcp.Model.DayUnits.Working;
     public required string Engine { get; init; }
     public required ScenarioOutcome Current { get; init; }
     public required IReadOnlyList<ScenarioOutcome> Scenarios { get; init; }
@@ -133,7 +135,7 @@ public static class ScenarioTools
     {
         var finish = MpxjBackend.ProjectFinish(project);
         var leaves = ScheduleAnalyzer.Leaves(project).ToList();
-        var cost = Math.Round(leaves.Sum(t => Convert.ToDouble(t.Cost ?? 0)), 2);
+        var cost = Math.Round(leaves.Sum(Writes.Costs.Of), 2);
         var windows = ResourceAnalyzer.Find(project);
         var calendar = new WorkingCalendar(project);
         double? delta = null;

@@ -555,7 +555,7 @@ public static class QueryTools
 
                 double total = measure.Trim().ToLowerInvariant() switch
                 {
-                    "cost" => task.Cost ?? 0,
+                    "cost" => Writes.Costs.Of(task),
                     "baseline_cost" => task.BaselineCost ?? 0,
                     "baseline_work" => MpxjMapper.Hours(task.BaselineWork) ?? 0,
                     "duration" => MpxjMapper.Days(task.Duration) ?? 0,
@@ -675,7 +675,7 @@ public static class QueryTools
             if (percent < 1 && task.Finish is not null)
             {
                 var remaining = valueMeasure == "cost"
-                    ? Math.Max(0, Convert.ToDouble(task.Cost ?? 0) - Convert.ToDouble(task.ActualCost ?? 0))
+                    ? Math.Max(0, Writes.Costs.Of(task) - Convert.ToDouble(task.ActualCost ?? 0))
                     : value * (1 - percent);
                 var from = task.Start is { } s0 && s0 > statusDate ? s0 : statusDate.AddDays(1);
                 Spread(etc, from, task.Finish.Value < from ? from : task.Finish, remaining);

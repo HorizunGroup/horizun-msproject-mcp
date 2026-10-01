@@ -290,7 +290,9 @@ def main() -> int:
         evm = client.call("baseline_compare", handle=handle, statusDate="2026-09-15")
         check("EVM reports the baseline is present", evm["baselinePresent"] is True)
         check("EVM produces the standard metrics",
-              all(k in evm["project"] for k in ("bcws", "bcwp", "acwp", "bac")))
+              all(k in evm["project"] for k in ("bcws", "bcwp", "bac"))
+              and ("acwp" in evm["project"] or evm["project"].get("actualsRecorded") is False),
+              json.dumps(evm["project"]))
 
         check("EVM names the unit it measured in",
               evm["project"].get("measure") in {"cost", "work_hours", "duration_days"},

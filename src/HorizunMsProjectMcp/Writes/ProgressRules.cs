@@ -31,6 +31,28 @@ public static class ProgressRules
     /// <summary>Assignments resized by an edit and not yet recalculated by Microsoft Project.</summary>
     internal static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ResourceAssignment, object> Resized = new();
 
+    /// <summary>
+    /// The moment the remaining work of an in-progress task was moved to, when it was moved past where
+    /// it would otherwise continue — reschedule_incomplete's split. Null for every other task.
+    /// </summary>
+    /// <remarks>
+    /// Microsoft Project keeps such a split only in the day-by-day work of the task, and does not read
+    /// it back from MSPDI — not from the task's resume date, not from a placeholder assignment, not
+    /// even from its own XML export (each measured: the remaining work snapped back, or drifted). So it
+    /// is kept here and set on the task through Project itself every time Project calculates.
+    /// </remarks>
+    public static DateTime? PendingResume(MPXJ.Net.Task task)
+    {
+        if (task.Summary || task.ActualStart is null || task.ActualFinish is not null
+            || (task.PercentageComplete ?? 0) >= 100 || task.Resume is not { } resume)
+        {
+            return null;
+        }
+
+        // Project writes Stop = Resume on a task it has not split.
+        return task.Stop is { } stop && (resume - stop).TotalMinutes <= 1 ? null : resume;
+    }
+
     public static void DurationChanged(ProjectFile project, MPXJ.Net.Task task, MPXJ.Net.Duration? before)
     {
         var hours = HoursPerDay(project);
@@ -123,6 +145,10 @@ public static class ProgressRules
         var hours = HoursPerDay(project);
         var percent = Math.Clamp(task.PercentageComplete ?? 0, 0, 100);
         var duration = MpxjMapper.Days(task.Duration, hours) ?? 0;
+
+        // New progress supersedes a reschedule: the work it moved is now reported, not forecast.
+        task.Stop = null;
+        task.Resume = null;
 
         Set(task, hours, duration, percent / 100.0 * duration, percent);
 

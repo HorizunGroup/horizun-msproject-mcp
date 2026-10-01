@@ -32,6 +32,11 @@ public sealed record ModelBuildReport
 /// The logic is a plain construction sequence — each trade follows the one before it on a level, and
 /// each trade moves up the building level by level — with a start and a finish milestone so nothing
 /// is left open-ended. It is a first draft to be reviewed (schedule_qa), not a finished programme.
+/// <para>Levels are Revit's, and Revit does not give every category the same one: a column carries its
+/// base level, a beam its top level. Grouped as modelled, the columns from 02 to 03 are scheduled with
+/// level 02 — before slab 02, which carries them. <c>columnsWithLevelAbove</c> moves columns to the level
+/// above their base and starts each level after the one below; without it the report says so whenever
+/// columns are present.</para>
 /// </remarks>
 public static class ModelScheduleBuilder
 {
@@ -66,7 +71,8 @@ public static class ModelScheduleBuilder
         IReadOnlyDictionary<string, double>? productivity,
         double defaultDays,
         IReadOnlyList<string>? sequence,
-        string codeField)
+        string codeField,
+        bool columnsWithLevelAbove = false)
     {
         var notes = new List<string>();
         var usable = elements.Where(e => !string.IsNullOrWhiteSpace(e.Code) || !string.IsNullOrWhiteSpace(e.Category)).ToList();
@@ -111,6 +117,42 @@ public static class ModelScheduleBuilder
             .ThenBy(l => l, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        // A column's level in Revit is its base; the level it belongs to in the sequence is the one it
+        // carries, above it.
+        var columns = usable.Where(IsColumn).ToList();
+        var levelOf = usable.ToDictionary(e => e, e => string.IsNullOrWhiteSpace(e.Level) ? "(no level)" : e.Level!.Trim());
+        if (columnsWithLevelAbove && columns.Count > 0)
+        {
+            var moved = 0;
+            var stayed = 0;
+            foreach (var column in columns)
+            {
+                var index = levelOrder.FindIndex(l => string.Equals(l, levelOf[column], StringComparison.OrdinalIgnoreCase));
+                if (index >= 0 && index + 1 < levelOrder.Count && levelOrder[index + 1] != "(no level)")
+                {
+                    levelOf[column] = levelOrder[index + 1];
+                    moved++;
+                }
+                else
+                {
+                    stayed++;
+                }
+            }
+
+            notes.Add($"{moved} column(s) scheduled with the level above their base (the level they carry); each "
+                      + "level starts when the one below is finished."
+                      + (stayed > 0 ? $" {stayed} on the top level or with no level stayed where modelled." : ""));
+        }
+        else if (columns.Count > 0 && levelOrder.Count > 1)
+        {
+            notes.Add($"Levels are as Revit gives them, and Revit gives a column its BASE level but a beam its TOP "
+                      + $"level: the {columns.Count} column(s) are scheduled with the level they stand on, before the "
+                      + "slab of that level that carries them. Pass columnsWithLevelAbove=true to schedule them with "
+                      + "the level above, or fix the logic with links_write.");
+        }
+
+        levelOrder = levelOrder.Where(l => usable.Any(e => string.Equals(levelOf[e], l, StringComparison.OrdinalIgnoreCase))).ToList();
+
         MPXJ.Net.Task NewTask(MPXJ.Net.Task? parent, string name)
         {
             var task = parent is null ? project.AddTask() : parent.AddTask();
@@ -143,6 +185,7 @@ public static class ModelScheduleBuilder
         var fromRates = 0;
         var assumed = 0;
         var previousOnLevel = new Dictionary<string, MPXJ.Net.Task>(StringComparer.OrdinalIgnoreCase); // trade -> task on the level below
+        MPXJ.Net.Task? lastOfLevelBelow = null;
 
         foreach (var level in levelOrder)
         {
@@ -152,9 +195,7 @@ public static class ModelScheduleBuilder
 
             foreach (var trade in trades)
             {
-                var here = trade.Where(e => string.Equals(
-                    string.IsNullOrWhiteSpace(e.Level) ? "(no level)" : e.Level!.Trim(), level,
-                    StringComparison.OrdinalIgnoreCase)).ToList();
+                var here = trade.Where(e => string.Equals(levelOf[e], level, StringComparison.OrdinalIgnoreCase)).ToList();
                 if (here.Count == 0)
                 {
                     continue;
@@ -201,7 +242,15 @@ public static class ModelScheduleBuilder
                     Link(below, task);
                 }
 
-                if (previousTrade is null && !previousOnLevel.ContainsKey(trade.Key))
+                // Building up: a level starts once the level below is finished (its last trade, the slab).
+                var afterLevelBelow = columnsWithLevelAbove && previousTrade is null && lastOfLevelBelow is not null
+                                      && !ReferenceEquals(lastOfLevelBelow, below);
+                if (afterLevelBelow)
+                {
+                    Link(lastOfLevelBelow!, task);
+                }
+
+                if (previousTrade is null && !previousOnLevel.ContainsKey(trade.Key) && !afterLevelBelow)
                 {
                     Link(start, task);
                 }
@@ -221,6 +270,8 @@ public static class ModelScheduleBuilder
                     MatchedOn = "built from the model",
                 });
             }
+
+            lastOfLevelBelow = previousTrade ?? lastOfLevelBelow;
         }
 
         var finish = NewTask(null, "Fin de obra");
@@ -277,6 +328,10 @@ public static class ModelScheduleBuilder
             Notes = notes,
         };
     }
+
+    private static bool IsColumn(BimElement e) =>
+        $"{e.Category} {e.Family}".ToLowerInvariant() is var text
+        && new[] { "column", "columna", "pilar" }.Any(text.Contains);
 
     private static double? RateFor(IReadOnlyDictionary<string, double>? rates, BimElement e, string? unit)
     {

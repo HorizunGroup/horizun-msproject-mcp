@@ -27,6 +27,8 @@ public sealed record RiskDriver
 
 public sealed record RiskReport
 {
+    /// <summary>The unit of every day figure in this report.</summary>
+    public string DayUnit { get; init; } = Horizun.ProjectMcp.Model.DayUnits.Working;
     public required int Iterations { get; init; }
     public required string DataDate { get; init; }
     public required string DeterministicFinish { get; init; }
@@ -62,10 +64,14 @@ public sealed record HistogramBin
 /// </summary>
 /// <remarks>
 /// The simulation is a forward pass over the schedule's own logic — all four relation types and their
-/// lags, in working days of the project calendar — from the status date. It does not re-run Microsoft
-/// Project a thousand times; it is calibrated instead: the run with every task at its most likely
-/// duration is reported beside the schedule's own finish, so any difference between the two (hard
-/// constraints, calendars per task) is visible rather than hidden in the percentiles.
+/// lags — from the status date, counted in working hours of the project calendar. It does not re-run
+/// Microsoft Project a thousand times; it is anchored instead: the run with every task at its most likely
+/// duration is the schedule's own finish, and every other run is placed by how much later or earlier it
+/// finishes than that one.
+/// <para>It used to count whole calendar working days: a four-hour Saturday counted as a full day, and
+/// a lag of three elapsed days as three working days. On a Monday-to-Saturday schedule with curing lags
+/// its most-likely run finished 11 working days before the schedule it was simulating, and every
+/// percentile carried that bias.</para>
 /// </remarks>
 public static class ScheduleRisk
 {
@@ -92,17 +98,25 @@ public static class ScheduleRisk
         var leaves = ScheduleAnalyzer.Leaves(project).Where(t => t.UniqueID is not null).ToList();
         var nodes = new Dictionary<int, Node>();
         var ranged = 0;
+        // Everything below is in working hours; a "day" is the schedule's hours per day, as Project reads it.
         foreach (var t in leaves)
         {
             var uid = t.UniqueID!.Value;
             var percent = Convert.ToDouble(t.PercentageComplete ?? 0);
-            var total = MpxjMapper.Days(t.Duration, hours) ?? 0;
-            var remaining = percent >= 100 ? 0 : MpxjMapper.Days(t.RemainingDuration, hours) ?? total * (1 - percent / 100);
+            var total = (MpxjMapper.Days(t.Duration, hours) ?? 0) * hours;
+            var remaining = percent >= 100
+                ? 0
+                : MpxjMapper.Days(t.RemainingDuration, hours) is { } left ? left * hours : total * (1 - percent / 100);
             var node = new Node { Task = t, Uid = uid, Done = percent >= 100 ? 1 : 0 };
 
             if (ranges is not null && ranges.TryGetValue(uid, out var given))
             {
-                node.Range = given;
+                node.Range = new RiskRange
+                {
+                    Optimistic = given.Optimistic * hours,
+                    MostLikely = given.MostLikely * hours,
+                    Pessimistic = given.Pessimistic * hours,
+                };
                 ranged++;
             }
             else
@@ -116,7 +130,7 @@ public static class ScheduleRisk
             }
 
             // Where the task cannot start before: its current start, for work with nothing driving it.
-            node.Floor = t.Start is { } start && start > dataDate ? calendar.WorkingDaysBetween(dataDate, start) : 0;
+            node.Floor = t.Start is { } start && start > dataDate ? calendar.WorkingHoursBetween(dataDate, start) : 0;
             nodes[uid] = node;
         }
 
@@ -126,7 +140,8 @@ public static class ScheduleRisk
             {
                 if (r.PredecessorTask?.UniqueID is int from && nodes.ContainsKey(from))
                 {
-                    node.Preds.Add((from, r.Type ?? RelationType.FinishStart, MpxjMapper.Days(r.Lag, hours) ?? 0));
+                    var type = r.Type ?? RelationType.FinishStart;
+                    node.Preds.Add((from, type, LagHours(r, type, nodes[from], calendar, hours)));
                 }
             }
         }
@@ -165,7 +180,13 @@ public static class ScheduleRisk
 
         var sorted = finishes.OrderBy(f => f).ToArray();
         double Percentile(double p) => sorted[Math.Clamp((int)Math.Ceiling(p * sorted.Length) - 1, 0, sorted.Length - 1)];
-        string DateAt(double offset) => calendar.AddWorkingDays(dataDate, offset).ToString("yyyy-MM-dd");
+
+        // Anchored on the schedule: the most-likely run is the schedule's own finish, and a run that
+        // takes longer finishes that many working hours after it.
+        var scheduled = MpxjBackend.ProjectFinish(project);
+        var anchor = scheduled ?? calendar.AddWorkingHours(dataDate, deterministic);
+        DateTime MomentAt(double offset) => calendar.AddWorkingHours(anchor, offset - deterministic);
+        string DateAt(double offset) => MomentAt(offset).ToString("yyyy-MM-dd");
 
         var percentiles = new Dictionary<string, string>
         {
@@ -182,8 +203,10 @@ public static class ScheduleRisk
                 return null;
             }
 
-            var limit = date.Value <= dataDate ? 0 : calendar.WorkingDaysBetween(dataDate, date.Value);
-            return Math.Round(100.0 * finishes.Count(f => f <= limit + 1e-9) / finishes.Length, 1);
+            // A date is met by any run finishing within that day.
+            var endOfDay = date.Value.TimeOfDay == TimeSpan.Zero ? calendar.FinishOn(date.Value) : date.Value;
+            var limit = deterministic + calendar.WorkingHoursBetween(anchor, endOfDay);
+            return Math.Round(100.0 * finishes.Count(f => f <= limit + 1e-6) / finishes.Length, 1);
         }
 
         var baselineFinish = leaves.Select(t => t.BaselineFinish).Where(d => d is not null).DefaultIfEmpty().Max();
@@ -196,7 +219,7 @@ public static class ScheduleRisk
                 Name = n.Task.Name,
                 CriticalityPercent = Math.Round(100.0 * critical[n.Uid] / iterations, 1),
                 Sensitivity = Math.Round(Correlation(sampled[n.Uid], finishes), 3),
-                Range = $"{n.Range.Optimistic:0.#} / {n.Range.MostLikely:0.#} / {n.Range.Pessimistic:0.#} d",
+                Range = $"{n.Range.Optimistic / hours:0.#} / {n.Range.MostLikely / hours:0.#} / {n.Range.Pessimistic / hours:0.#} d",
             })
             .OrderByDescending(d => d.Sensitivity)
             .ThenByDescending(d => d.CriticalityPercent)
@@ -208,7 +231,7 @@ public static class ScheduleRisk
         {
             var low = sorted[0];
             var high = sorted[^1];
-            var width = Math.Max((high - low) / 12, 1);
+            var width = Math.Max((high - low) / 12, hours);
             var running = 0;
             for (var b = low; b <= high + 1e-9; b += width)
             {
@@ -222,16 +245,18 @@ public static class ScheduleRisk
             }
         }
 
-        var scheduled = MpxjBackend.ProjectFinish(project);
         if (scheduled is not null)
         {
-            var gap = calendar.WorkingDaysBetween(calendar.AddWorkingDays(dataDate, deterministic), scheduled.Value);
-            if (Math.Abs(gap) > 2)
+            // What the forward pass alone makes of the most-likely durations, before anchoring: a large
+            // difference means the schedule holds something the pass does not model.
+            var raw = calendar.AddWorkingHours(dataDate, deterministic);
+            var gap = calendar.WorkingHoursBetween(raw, scheduled.Value) / hours;
+            if (Math.Abs(gap) > 1)
             {
-                notes.Add($"With every task at its most likely duration the simulation finishes {Math.Abs(gap):0.#} working "
-                          + $"days {(gap > 0 ? "earlier" : "later")} than the schedule itself. Constraints, deadlines or task "
-                          + "calendars the forward pass does not model account for the difference; read the percentiles "
-                          + "relative to the deterministic finish.");
+                notes.Add($"With every task at its most likely duration the forward pass alone finishes {Math.Abs(gap):0.#} "
+                          + $"working days {(gap > 0 ? "earlier" : "later")} than the schedule. Constraints, deadlines, "
+                          + "task calendars or resource-driven dates it does not model account for that; the percentiles "
+                          + "are placed relative to the schedule's own finish, so they are not shifted by it.");
             }
         }
 
@@ -253,12 +278,13 @@ public static class ScheduleRisk
             ProbabilityOfTarget = Probability(target),
             BaselineFinish = MpxjMapper.Iso(baselineFinish),
             ProbabilityOfBaseline = Probability(baselineFinish),
-            ContingencyP80Days = Math.Round(Math.Max(0, Percentile(0.80) - deterministic), 1),
+            ContingencyP80Days = Math.Round(Math.Max(0, Percentile(0.80) - deterministic) / hours, 1),
             Drivers = drivers,
             Histogram = bins,
             Assumptions = $"{(pert ? "PERT" : "Triangular")} distribution on remaining durations; {ranged} task(s) with "
                           + $"their own range, the rest {optimisticPct:+0;-0}%/{pessimisticPct:+0;-0}%; durations independent; "
-                          + "logic, relation types and lags as scheduled; working days of the project calendar from the data date.",
+                          + "logic, relation types and lags as scheduled (elapsed lags as the working time they span); "
+                          + "working hours of the project calendar from the data date, anchored on the schedule's finish.",
             Notes = notes,
         };
     }
@@ -307,6 +333,35 @@ public static class ScheduleRisk
         }
 
         return last.Value;
+    }
+
+    /// <summary>A lag in working hours. An elapsed lag (curing: 3 calendar days) is the working time it
+    /// spans where the schedule puts it, not three working days.</summary>
+    private static double LagHours(Relation relation, RelationType type, Node predecessor, WorkingCalendar calendar, double hours)
+    {
+        var lag = relation.Lag;
+        if (lag is null)
+        {
+            return 0;
+        }
+
+        if (lag.Units is TimeUnit.Percent or TimeUnit.ElapsedPercent)
+        {
+            return lag.DurationValue / 100.0 * predecessor.Range.MostLikely;
+        }
+
+        var elapsed = lag.Units is TimeUnit.ElapsedMinutes or TimeUnit.ElapsedHours or TimeUnit.ElapsedDays
+            or TimeUnit.ElapsedWeeks or TimeUnit.ElapsedMonths or TimeUnit.ElapsedYears;
+        var from = type is RelationType.StartStart or RelationType.StartFinish
+            ? predecessor.Task.Start
+            : predecessor.Task.Finish;
+        if (elapsed && from is { } at)
+        {
+            var span = MpxjMapper.Days(lag, 24) ?? 0; // elapsed days are 24-hour days
+            return calendar.WorkingHoursBetween(at, at.AddDays(span));
+        }
+
+        return (MpxjMapper.Days(lag, hours) ?? 0) * hours;
     }
 
     private static List<int> TopologicalOrder(Dictionary<int, Node> nodes)

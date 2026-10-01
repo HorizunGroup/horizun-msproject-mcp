@@ -247,6 +247,13 @@ public static class PlanningTools
         [Description("Task field that receives the element code for 4D, e.g. 'Text1'. Defaults to Text1.")]
         string codeField = "Text1",
         [Description(
+            "Revit gives a column its BASE level and a beam its TOP level, so grouped as modelled the "
+            + "columns from level 02 to 03 land with level 02 and are scheduled before slab 02, which "
+            + "carries them. true moves columns to the level above their base — the level they carry — and "
+            + "starts each level after the one below is finished: slab 01, columns 01-02, beams 02, slab 02. "
+            + "Defaults to false (grouped as modelled).")]
+        bool columnsWithLevelAbove = false,
+        [Description(
             "Activity keys to include, as listed in the library. Omit to use every activity in it.")]
         string[]? activities = null,
         [Description("Name for the new project.")] string? name = null,
@@ -269,7 +276,7 @@ public static class PlanningTools
         {
             return GenerateFromModel(outputPath, startDate, name,
                 elements is { Length: > 0 } ? elements : BimLinkStore.LoadElements(Guard.ExistingFile(elementsPath, "elementsPath")),
-                productivity, defaultDays, sequence, codeField);
+                productivity, defaultDays, sequence, codeField, columnsWithLevelAbove);
         }
 
         if (string.IsNullOrWhiteSpace(libraryPath))
@@ -599,7 +606,8 @@ public static class PlanningTools
 
     private static GenerateResult GenerateFromModel(
         string outputPath, string startDate, string? name, IReadOnlyList<BimElement> elements,
-        Dictionary<string, double>? productivity, double defaultDays, string[]? sequence, string codeField)
+        Dictionary<string, double>? productivity, double defaultDays, string[]? sequence, string codeField,
+        bool columnsWithLevelAbove)
     {
         if (QueryTools.ParseDate(startDate) is null)
         {
@@ -613,7 +621,7 @@ public static class PlanningTools
         var project = session.File;
 
         var built = ModelScheduleBuilder.Build(project, opened.Path, elements, productivity,
-            defaultDays <= 0 ? 1 : defaultDays, sequence, codeField);
+            defaultDays <= 0 ? 1 : defaultDays, sequence, codeField, columnsWithLevelAbove);
         var report = Scheduler.Run(project);
         session.Dirty = true;
 

@@ -32,6 +32,7 @@ internal sealed record Snapshot
     public required IReadOnlyDictionary<int, (DateTime? Start, DateTime? Finish)> Dates { get; init; }
     public required IReadOnlySet<int> CriticalUids { get; init; }
     public required int NegativeFloatCount { get; init; }
+    public required Analysis.WorkingCalendar Calendar { get; init; }
 
     public static Snapshot Capture(ProjectFile project)
     {
@@ -64,6 +65,7 @@ internal sealed record Snapshot
             Dates = dates,
             CriticalUids = critical,
             NegativeFloatCount = negative,
+            Calendar = new Analysis.WorkingCalendar(project),
         };
     }
 }
@@ -277,7 +279,7 @@ public static class WriteEngine
         }
 
         var delta = before.ProjectFinish is not null && after.ProjectFinish is not null
-            ? Math.Round((after.ProjectFinish.Value - before.ProjectFinish.Value).TotalDays, 2)
+            ? after.Calendar.ShiftInWorkingDays(before.ProjectFinish.Value, after.ProjectFinish.Value)
             : 0;
 
         return new ImpactReport

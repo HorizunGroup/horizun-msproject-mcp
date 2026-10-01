@@ -125,7 +125,9 @@ vecinos, ambas herramientas lo dicen y dan el número.
 
 - **Riesgo cuantitativo del cronograma** (`schedule_risk`): Monte Carlo sobre la lógica de la red, los
   cuatro tipos de vínculo y sus desfases, con rangos de tres puntos por tarea o una dispersión por
-  defecto. Fin P10/P50/P80/P90, probabilidad de cumplir una meta y la línea base, contingencia al P80,
+  defecto, contada en horas laborables del calendario del proyecto (sábados de media jornada y desfases
+  transcurridos incluidos) y anclada en el fin del propio cronograma, así que la corrida más probable es
+  el cronograma. Fin P10/P50/P80/P90, probabilidad de cumplir una meta y la línea base, contingencia al P80,
   impulsores del riesgo por criticidad y sensibilidad. Con semilla, se repite exacto.
 - **Informe de estado del periodo** (aspecto `status_report` de `schedule_analyze`): planeado vs
   ganado, SPI, CPI, SPI(t) de earned schedule, EAC por tres métodos, TCPI, fin pronosticado, hitos en

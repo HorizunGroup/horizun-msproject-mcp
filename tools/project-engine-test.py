@@ -21,6 +21,7 @@ is used: every schedule is generated here.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -330,6 +331,77 @@ def main() -> None:
     check("'Peón' keeps its work at 400%, nothing lands on 'Electricista', cement is 15 bags",
           on_caseta == {"Peón": 400, "Electricista": None, "Cemento": 15}, json.dumps(on_caseta, ensure_ascii=False))
     check("Saturday 08:00-13:00 on the project calendar", week.get("Saturday") == "08:00-13:00", json.dumps(week))
+
+    # 2d. A resource created on a schedule read from disk. Found in the 2026-09-30 dry run: it went to
+    # Project with no calendar, Project gave it the locale's (9-13, 15-19), and assigning one crew cut a
+    # quarter-day off 13 tasks, put finishes at 19:00 and collapsed the critical path to 3 tasks.
+    print("\nassigning a resource created on a schedule read from disk")
+    mcp = Mcp()
+    try:
+        h = mcp.call("project_open", path=str(work / "crew.xml"), create=True, name="Crew", startDate="2026-10-05")["handle"]
+        mcp.call("calendars_write", handle=h, ops=[{"op": "set_week", "name": "Standard", "days": "sat", "hours": "08:00-12:00"}])
+        mcp.call("tasks_write", handle=h, ops=[{"op": "create", "name": f"Tarea {n}", "duration": d}
+                                               for n, d in enumerate(["22d", "13d", "5.5d", "17.5d"], 1)])
+        ids = sorted(t["uid"] for t in mcp.call("tasks_query", handle=h, limit=100)["items"] if not t["summary"])
+        mcp.call("links_write", handle=h, ops=[{"op": "link", "from": a, "to": b} for a, b in zip(ids, ids[1:])])
+        mcp.call("schedule_update", handle=h, op="recalculate")
+        mcp.call("project_save", handle=h)
+        h = mcp.call("project_open", path=str(work / "crew.xml"))["handle"]
+        before = {t["uid"]: t for t in mcp.call("tasks_query", handle=h, limit=100)["items"]}
+        mcp.call("resources_write", handle=h, ops=[{"op": "create", "name": "Cuadrilla concreto", "standardRate": 150000}])
+        crew = mcp.call("resources_query", handle=h)["items"][0]["uid"]
+        assigned = mcp.call("resources_write", handle=h, ops=[{"op": "assign", "uid": crew, "taskUid": u} for u in ids])
+        after = {t["uid"]: t for t in mcp.call("tasks_query", handle=h, limit=100)["items"]}
+        calendar = mcp.call("resources_write", handle=h, ops=[{"op": "update", "uid": crew, "calendar": "Standard"}])
+    finally:
+        mcp.close()
+    moved = [u for u in before if (before[u]["start"], before[u]["finish"], before[u].get("duration"))
+             != (after[u]["start"], after[u]["finish"], after[u].get("duration"))]
+    check("assigning the crew moves no task and changes no duration", assigned["applied"] == len(ids) and not moved,
+          f'{assigned["impact"]} moved {moved}')
+    check("no task works outside the calendar's 08:00-17:00",
+          all("08:00" <= t[f][11:16] <= "17:00" for t in after.values() for f in ("start", "finish") if t[f]),
+          str([(t["start"], t["finish"]) for t in after.values()]))
+    check("'update calendar' on the resource survives Project's calculation", calendar["applied"] == 1,
+          json.dumps(calendar["rejected"]))
+
+    # 2e. reschedule_incomplete against Project's own "reschedule uncompleted work to start after"
+    # (UpdateProject, action 2). Found in the dry run: the task in progress was never moved.
+    print("\nreschedule_incomplete against Project's own command")
+    mcp = Mcp()
+    try:
+        h = mcp.call("project_open", path=str(work / "late.xml"), create=True, name="Late", startDate="2026-11-02")["handle"]
+        mcp.call("tasks_write", handle=h, ops=[{"op": "create", "name": "T1", "duration": "10d"},
+                                               {"op": "create", "name": "T2", "duration": "5d"},
+                                               {"op": "create", "name": "T3", "duration": "3d"}])
+        late = {t["name"]: t["uid"] for t in mcp.call("tasks_query", handle=h, limit=100)["items"] if not t["summary"]}
+        mcp.call("links_write", handle=h, ops=[{"op": "link", "from": late["T1"], "to": late["T2"]}])
+        mcp.call("schedule_update", handle=h, op="save_baseline", reason="test")
+        mcp.call("tasks_write", handle=h, ops=[{"op": "update", "uid": late["T1"], "actualStart": "2026-11-02T08:00:00",
+                                                "percentComplete": 20}])
+        mcp.call("schedule_update", handle=h, op="set_status_date", statusDate="2026-11-13T17:00:00")
+        mcp.call("project_export", handle=h, path=str(work / "late-src.xml"), format="mspdi")
+    finally:
+        mcp.close()
+    # Project splits in-progress tasks only where the file allows it, and takes the option only from the file.
+    src = (work / "late-src.xml").read_text(encoding="utf-8")
+    (work / "late-split.xml").write_text(re.sub(r"<SplitsInProgressTasks>0</SplitsInProgressTasks>",
+                                                "<SplitsInProgressTasks>1</SplitsInProgressTasks>", src), encoding="utf-8")
+    mcp = Mcp()
+    try:
+        h = mcp.call("project_open", path=str(work / "late-split.xml"))["handle"]
+        mcp.call("project_export", handle=h, path=str(work / "late.mpp"), format="mpp")
+        h = mcp.call("project_open", path=str(work / "late.mpp"))["handle"]
+        moved = mcp.call("schedule_update", handle=h, op="reschedule_incomplete")
+        mcp.call("project_export", handle=h, path=str(work / "late-mcp.xml"), format="mspdi")
+    finally:
+        mcp.close()
+    project_native(work / "late.mpp", work / "late-oracle.xml",
+                   lambda pj: pj.Application.UpdateProject(True, pj.StatusDate, 2))
+    same, total, bad = agree(tasks(work / "late-mcp.xml"), tasks(work / "late-oracle.xml"))
+    check("reschedule_incomplete: applied", moved["applied"] == 1, json.dumps(moved["rejected"])[:300])
+    check("reschedule_incomplete: dates match Project's own command on every task", same == total and total > 0,
+          f"{same}/{total}, differ: {bad}")
 
     # 3. A guest in the user's Project.
     print("\nsharing a Project the user has open")

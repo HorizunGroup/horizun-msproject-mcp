@@ -323,17 +323,35 @@ public static class WriteTools
             }
             else
             {
-                var own = resource.Calendar;
-                if (own is null || own.Parent is null)
-                {
-                    own = resource.AddCalendar();
-                }
-
-                own.Parent = basis;
+                AttachOwnCalendar(project, resource, basis);
                 Check("calendar", op.Calendar, r => r.Calendar?.Parent?.Name ?? r.Calendar?.Name,
                     "The resource calendar did not survive the write.");
             }
         }
+    }
+
+    /// <summary>Gives a resource its own calendar derived from <paramref name="basis"/>, linked by id.</summary>
+    /// <remarks>
+    /// The resource records its calendar by unique id, taken when the two are linked. On a schedule
+    /// read from a file MPXJ gives a new calendar no id, so linked straight away the resource recorded
+    /// none: it was written with no calendar, its own was written as an unrelated base calendar, and
+    /// Microsoft Project gave it the locale's — every task it was assigned to moved to 9:00-19:00 hours,
+    /// lost a quarter-day, and the critical path collapsed. The id comes first, then the link.
+    /// </remarks>
+    private static void AttachOwnCalendar(ProjectFile project, Resource resource, ProjectCalendar? basis)
+    {
+        // A derived calendar of its own is kept and rebased. Anything else — none, or a base calendar
+        // the resource merely points at — is not its own to change: it gets a new one.
+        var own = resource.Calendar;
+        if (own is null || own.Parent is null)
+        {
+            own = project.AddCalendar();
+            own.Name = resource.Name;
+        }
+
+        own.Parent = basis;
+        Writes.Structure.EnsureIds(project);
+        resource.Calendar = own;
     }
 
     /// <summary>
@@ -528,6 +546,7 @@ public static class WriteTools
         if (op.FixedCost is not null)
         {
             task.FixedCost = op.FixedCost.Value;
+            Writes.Costs.Refresh(task);
             Verify(pending, uid, "fixedCost", op.FixedCost, t => t.FixedCost, "The fixed cost did not survive the write.");
         }
 
@@ -683,8 +702,37 @@ public static class WriteTools
     /// Walks forward from <paramref name="to"/> looking for <paramref name="from"/>. If it is
     /// reachable, adding from -> to would close a loop.
     /// </summary>
+    /// <remarks>
+    /// The graph is built from every task's predecessors — the side the file is written from and
+    /// every link check reads — rather than from the successor lists MPXJ keeps alongside. Those went
+    /// stale after an unlink: an unlink earlier in the same batch, or in an earlier call on the same
+    /// document, still closed a "cycle" through the link it had removed, so a dry run (on a fresh copy)
+    /// accepted what the real apply then refused until the file was reopened.
+    /// </remarks>
     private static List<int>? FindCycle(ProjectFile project, int from, int to)
     {
+        var successors = new Dictionary<int, List<int>>();
+        foreach (var task in project.Tasks)
+        {
+            if (task.UniqueID is not { } successor)
+            {
+                continue;
+            }
+
+            foreach (var relation in task.Predecessors)
+            {
+                if (relation.PredecessorTask?.UniqueID is { } predecessor)
+                {
+                    if (!successors.TryGetValue(predecessor, out var list))
+                    {
+                        successors[predecessor] = list = new List<int>();
+                    }
+
+                    list.Add(successor);
+                }
+            }
+        }
+
         var stack = new Stack<(int Uid, List<int> Path)>();
         stack.Push((to, new List<int> { to }));
         var seen = new HashSet<int>();
@@ -703,19 +751,9 @@ public static class WriteTools
                 continue;
             }
 
-            var task = project.GetTaskByUniqueID(uid);
-            if (task is null)
+            foreach (var next in successors.GetValueOrDefault(uid) ?? new List<int>())
             {
-                continue;
-            }
-
-            foreach (var relation in task.Successors)
-            {
-                var next = relation.SuccessorTask?.UniqueID;
-                if (next is not null)
-                {
-                    stack.Push((next.Value, new List<int>(path) { next.Value }));
-                }
+                stack.Push((next, new List<int>(path) { next }));
             }
         }
 
@@ -853,15 +891,25 @@ public static class WriteTools
                                 "overwriteBaseline=true if replacing it is genuinely what you want.");
                         }
 
+                        // The budget is what each task costs now — fixed cost plus resources, added up
+                        // as Project does — not the stored cost field, which a fixed cost written here
+                        // left at 0. A summary's is its children's.
+                        var costs = project.Tasks.Where(t => !t.Summary && t.UniqueID is not null)
+                            .ToDictionary(t => t.UniqueID!.Value, Writes.Costs.Of);
+                        double CostOf(MPXJ.Net.Task task) => task.Summary
+                            ? Descendants(task).Where(c => !c.Summary && c.UniqueID is not null).Sum(c => costs[c.UniqueID!.Value])
+                            : task.UniqueID is { } id && costs.TryGetValue(id, out var cost) ? cost : 0;
+
                         foreach (var task in project.Tasks)
                         {
+                            var cost = CostOf(task);
                             if (baseline == 0)
                             {
                                 task.BaselineStart = task.Start;
                                 task.BaselineFinish = task.Finish;
                                 task.BaselineDuration = task.Duration;
                                 task.BaselineWork = task.Work;
-                                task.BaselineCost = task.Cost;
+                                task.BaselineCost = cost;
                             }
                             else
                             {
@@ -869,7 +917,7 @@ public static class WriteTools
                                 if (task.Finish is not null) task.SetBaselineFinish(baseline, task.Finish.Value);
                                 task.SetBaselineDuration(baseline, task.Duration);
                                 task.SetBaselineWork(baseline, task.Work);
-                                task.SetBaselineCost(baseline, task.Cost);
+                                task.SetBaselineCost(baseline, cost);
                             }
                         }
 
@@ -889,7 +937,7 @@ public static class WriteTools
                         {
                             var newFinish = project.Tasks.Where(t => !t.Summary).Select(t => t.Finish)
                                 .Where(d => d is not null).DefaultIfEmpty().Max();
-                            var newBudget = project.Tasks.Where(t => !t.Summary).Sum(t => Convert.ToDouble(t.Cost ?? 0));
+                            var newBudget = Math.Round(costs.Values.Sum(), 2);
                             Analysis.PmoLedger.Record(session.Path, new Analysis.ChangeEntry
                             {
                                 Kind = existing > 0 ? "rebaseline" : "baseline",
@@ -899,7 +947,7 @@ public static class WriteTools
                                 FinishBefore = MpxjMapper.Iso(previousFinish),
                                 FinishAfter = MpxjMapper.Iso(newFinish),
                                 FinishDeltaDays = previousFinish is null || newFinish is null ? null
-                                    : Math.Round((newFinish.Value - previousFinish.Value).TotalDays, 1),
+                                    : Math.Round(new Analysis.WorkingCalendar(project).ShiftInWorkingDays(previousFinish.Value, newFinish.Value), 1),
                                 BudgetBefore = previousBudget,
                                 BudgetAfter = newBudget,
                             });
@@ -917,7 +965,7 @@ public static class WriteTools
                             : !string.IsNullOrWhiteSpace(budgetPath)
                                 ? Writes.BudgetLoader.ReadCsv(Guard.ExistingFile(budgetPath, "budgetPath"))
                                 : throw new McpToolException("load_budget needs 'budget' (code to amount) or 'budgetPath' (a CSV of code,amount).");
-                        var before = project.Tasks.Where(t => !t.Summary).Sum(t => Convert.ToDouble(t.Cost ?? 0));
+                        var before = project.Tasks.Where(t => !t.Summary).Sum(Writes.Costs.Of);
                         var loaded = Writes.BudgetLoader.Load(project, lines, codeField);
                         foreach (var note in loaded.Notes)
                         {
@@ -1094,43 +1142,128 @@ public static class WriteTools
                                        + "first with op='set_status_date'.");
 
                         var calendar = new Analysis.WorkingCalendar(project);
-                        var moved = 0;
+                        // Work resumes at the first working moment after the status date, as Project's own
+                        // command does: after 17:00 on a status date given with a time, after the whole day on
+                        // one given as a day.
+                        var reported = asOf.TimeOfDay == TimeSpan.Zero ? asOf.Date.AddDays(1) : asOf;
+                        var resumeDay = calendar.NextWorkingDay(reported);
+                        var resumeAt = resumeDay == reported.Date && reported < calendar.FinishOn(resumeDay)
+                            ? (reported > calendar.StartOn(resumeDay) ? reported : calendar.StartOn(resumeDay))
+                            : calendar.StartOn(resumeDay == reported.Date ? calendar.NextWorkingDay(resumeDay.AddDays(1)) : resumeDay);
+                        var unstarted = new List<int>();
+                        var inProgress = new List<int>();
+                        var passed = new List<string>();
 
                         foreach (var task in project.Tasks.Where(t => !t.Summary && t.UniqueID is not null))
                         {
-                            // Work that is finished stays where it is; unstarted work in the past is
-                            // pulled forward so the forecast stops claiming the impossible.
+                            // Work that is finished stays where it is.
                             if (task.ActualFinish is not null || (task.PercentageComplete ?? 0) >= 100)
                             {
                                 continue;
                             }
 
-                            if (task.Start is null || task.Start >= asOf || task.ActualStart is not null)
+                            if (task.ActualStart is not null)
+                            {
+                                // In progress, with its remaining work still forecast before the status
+                                // date: the remaining work resumes after it, as Project's own "reschedule
+                                // uncompleted work" does by splitting the task — measured against it, to
+                                // the minute. It used to be skipped, so the task most behind stayed where
+                                // it was and nothing after it moved.
+                                var continuesAt = task.Resume ?? task.Stop ?? RemainingStartsAt(task, calendar);
+                                if (continuesAt < resumeAt)
+                                {
+                                    task.Stop = continuesAt;
+                                    task.Resume = resumeAt;
+                                    inProgress.Add(task.UniqueID!.Value);
+                                }
+
+                                continue;
+                            }
+
+                            if (task.Start is null || task.Start >= asOf)
                             {
                                 continue;
                             }
 
+                            // Not marked started, yet work that depends on it already has: it happened and
+                            // was never reported (a start milestone, typically). Project would move it past
+                            // the status date with a constraint, and the work after it would go negative.
+                            // It is left where it is and named, to be marked complete.
+                            var uid = task.UniqueID!.Value;
+                            var startedAfter = project.Tasks
+                                .Where(t => t.ActualStart is not null
+                                            && t.Predecessors.Any(r => r.PredecessorTask?.UniqueID == uid))
+                                .Select(t => t.Name)
+                                .ToList();
+                            if (startedAfter.Count > 0)
+                            {
+                                passed.Add($"'{task.Name}' (uid {uid}), before '{startedAfter[0]}', which has started");
+                                continue;
+                            }
+
                             task.ConstraintType = ConstraintType.StartNoEarlierThan;
-                            task.ConstraintDate = Analysis.WorkingCalendar.AtStart(calendar.NextWorkingDay(asOf));
-                            moved++;
+                            task.ConstraintDate = resumeAt;
+                            unstarted.Add(uid);
                         }
 
-                        Analysis.Scheduler.Run(project);
+                        // Project splits in-progress tasks only where the schedule lets it: its default,
+                        // but MPXJ writes the option as No on everything it creates.
+                        if (inProgress.Count > 0 && project.ProjectProperties.SplitInProgressTasks != true)
+                        {
+                            project.ProjectProperties.SplitInProgressTasks = true;
+                            rejected.Add(new RejectedWrite
+                            {
+                                Field = "splitInProgressTasks",
+                                Requested = "on",
+                                Actual = "on",
+                                Reason = "'Split in-progress tasks' was off, so it was switched on (Microsoft Project's "
+                                         + "default): the remaining work of a task in progress can only move past the "
+                                         + "status date by splitting the task. This counts as applied.",
+                            });
+                        }
 
-                        var expected = moved;
-                        var cutoff = asOf;
+                        if (passed.Count > 0)
+                        {
+                            rejected.Add(new RejectedWrite
+                            {
+                                Field = "reschedule_incomplete",
+                                Requested = "moved after the status date",
+                                Actual = "left where it is",
+                                Reason = $"{passed.Count} task(s) not marked started, though work that depends on them "
+                                         + "already has: " + string.Join("; ", passed.Take(10))
+                                         + ". Moving them would put work already done before its predecessor "
+                                         + "(negative float). Mark them complete with their actual dates "
+                                         + "(tasks_write percentComplete=100 with actualStart/actualFinish).",
+                            });
+                        }
+
+                        var schedule = Analysis.Scheduler.Run(project);
+                        foreach (var warning in schedule.Warnings)
+                        {
+                            rejected.Add(new RejectedWrite { Field = "reschedule_incomplete", Reason = warning });
+                        }
+
+                        var cutoff = resumeAt;
                         current.Checks.Add(file =>
                         {
-                            var stragglers = file.Tasks.Count(t =>
-                                !t.Summary && t.ActualStart is null && (t.PercentageComplete ?? 0) < 100
-                                && t.Start is not null && t.Start < cutoff);
-
+                            var stragglers = unstarted.Count(uid => file.GetTaskByUniqueID(uid) is { } t
+                                                                    && t.ActualStart is null && t.Start < cutoff);
                             return stragglers == 0
                                 ? null
-                                : WriteEngine.Reject(-1, "reschedule_incomplete", $"{expected} moved",
+                                : WriteEngine.Reject(-1, "reschedule_incomplete", $"{unstarted.Count} moved",
                                     $"{stragglers} still before the status date",
                                     "Some unstarted work still forecasts a start before the status date, most "
                                     + "likely because a hard constraint holds it there. Run schedule_qa to find them.");
+                        });
+                        current.Checks.Add(file =>
+                        {
+                            var held = inProgress.Where(uid => file.GetTaskByUniqueID(uid) is { } t
+                                                               && (t.Finish is null || t.Finish <= resumeAt)).ToList();
+                            return held.Count == 0
+                                ? null
+                                : WriteEngine.Reject(held[0], "reschedule_incomplete",
+                                    $"remaining work from {resumeAt:yyyy-MM-dd HH:mm}", "not moved",
+                                    $"The remaining work of {held.Count} task(s) in progress did not move past the status date.");
                         });
                         break;
                     }
@@ -1380,7 +1513,7 @@ public static class WriteTools
                         // verification step below catches it and reports honestly.
                         try
                         {
-                            to.Predecessors.Remove(relation);
+                            Writes.Links.Remove(project, relation);
                         }
                         catch (Exception ex)
                         {
@@ -1468,8 +1601,7 @@ public static class WriteTools
                     // one, Microsoft Project gives it its own default base calendar — which is
                     // locale-dependent (9:00-13:00, 15:00-19:00 on a Spanish install) — and
                     // every task it is assigned to moves to those hours.
-                    var resourceCalendar = resource.AddCalendar();
-                    resourceCalendar.Parent = project.DefaultCalendar;
+                    AttachOwnCalendar(project, resource, project.DefaultCalendar);
                     if (op.Type is not null && Enum.TryParse<ResourceType>(op.Type, true, out var rt))
                     {
                         resource.Type = rt;
@@ -1662,6 +1794,22 @@ public static class WriteTools
 
         // A new assignment on a schedule read from a file has no unique id either.
         Writes.Structure.Normalize(project);
+
+        // What these tasks cost changed with who works them and at what rate.
+        var touched = ops.Where(o => o.Op.Trim().ToLowerInvariant() is "assign" or "unassign" && o.TaskUid is not null)
+            .Select(o => project.GetTaskByUniqueID(o.TaskUid!.Value))
+            .Concat(ops.Where(o => o.Op.Trim().ToLowerInvariant() == "update" && o.Uid is not null
+                                   && (o.StandardRate is not null || o.OvertimeRate is not null))
+                .SelectMany(o => project.ResourceAssignments
+                    .Where(a => a.Resource?.UniqueID == o.Uid)
+                    .Select(a => a.Task)))
+            .Where(t => t is not null)
+            .Distinct();
+        foreach (var task in touched)
+        {
+            Writes.Costs.Refresh(task!);
+        }
+
         return pending;
     }
 
@@ -1889,6 +2037,21 @@ public static class WriteTools
 
         return pending;
     }
+
+    /// <summary>Where a started task's remaining work picks up when nothing has moved it: its actual
+    /// start plus the working time already done.</summary>
+    private static DateTime RemainingStartsAt(MPXJ.Net.Task task, Analysis.WorkingCalendar calendar)
+    {
+        var done = MpxjMapper.Days(task.ActualDuration, calendar.HoursPerDay)
+                   ?? (MpxjMapper.Days(task.Duration, calendar.HoursPerDay) ?? 0) * (task.PercentageComplete ?? 0) / 100.0;
+        var day = done <= 0
+            ? calendar.NextWorkingDay(task.ActualStart!.Value)
+            : calendar.AddWorkingDays(task.ActualStart!.Value, done);
+        return calendar.FinishOn(day);
+    }
+
+    private static IEnumerable<MPXJ.Net.Task> Descendants(MPXJ.Net.Task task) =>
+        task.ChildTasks.SelectMany(child => new[] { child }.Concat(Descendants(child)));
 
     private static DateTime? SafeBaselineFinish(MPXJ.Net.Task task, int slot)
     {

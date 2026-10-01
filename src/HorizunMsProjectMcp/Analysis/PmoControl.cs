@@ -6,6 +6,8 @@ namespace Horizun.ProjectMcp.Analysis;
 /// <summary>The period status report a PMO issues at each cut-off.</summary>
 public sealed record StatusReport
 {
+    /// <summary>The unit of every day figure in this report.</summary>
+    public string DayUnit { get; init; } = Horizun.ProjectMcp.Model.DayUnits.Working;
     public required string StatusDate { get; init; }
     public required string Measure { get; init; }
 
@@ -188,7 +190,7 @@ public static class PmoControl
             // remaining work at its current rates and dates, not an index projected over it.
             if (measure == "cost")
             {
-                var remaining = leaves.Sum(t => Math.Max(0, Convert.ToDouble(t.Cost ?? 0) - Convert.ToDouble(t.ActualCost ?? 0)));
+                var remaining = leaves.Sum(t => Math.Max(0, Writes.Costs.Of(t) - Convert.ToDouble(t.ActualCost ?? 0)));
                 eac["bottomUp"] = Math.Round(ac.Value + remaining, 2);
             }
         }

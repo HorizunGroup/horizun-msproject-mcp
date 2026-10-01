@@ -37,10 +37,18 @@ public static class ProjectScheduler
             ProjectHandoff.Write(project, input);
             Lap("handoff");
 
+            var resumes = PendingResumes(project);
+            IReadOnlyList<int> refused = Array.Empty<int>();
             ProjectAutomation.Run(host =>
             {
                 host.Open(input, token);
                 host.Calculate(token);
+                if (resumes.Count > 0)
+                {
+                    refused = host.ApplyResumes(token, resumes);
+                    host.Calculate(token);
+                }
+
                 if (leveling is { } options)
                 {
                     host.Level(token, options.WithinSlack, options.CanSplit);
@@ -57,6 +65,16 @@ public static class ProjectScheduler
             Lap("read back");
 
             var report = CopyBack(calculated, project);
+            if (refused.Count > 0)
+            {
+                report = report with
+                {
+                    Warnings = report.Warnings.Append(
+                        $"Microsoft Project would not move the remaining work of {refused.Count} task(s) "
+                        + $"(uid {string.Join(", ", refused)}): the schedule does not split in-progress tasks.").ToList(),
+                };
+            }
+
             Lap("copy back");
             KeepForDiagnosis(input, output, timings);
             return report;
@@ -76,6 +94,14 @@ public static class ProjectScheduler
             }
         }
     }
+
+    internal static List<(int Uid, DateTime Resume)> PendingResumes(ProjectFile project) =>
+        project.Tasks
+            .Where(t => t.UniqueID is not null)
+            .Select(t => (Uid: t.UniqueID!.Value, Resume: Writes.ProgressRules.PendingResume(t)))
+            .Where(x => x.Resume is not null)
+            .Select(x => (x.Uid, x.Resume!.Value))
+            .ToList();
 
     /// <summary>
     /// HORIZUN_MSPROJECT_DEBUG_DIR keeps a copy of what went to Project and what came back — the two
@@ -142,6 +168,19 @@ public static class ProjectScheduler
             target.Critical = source.Critical;
             // What levelling added is Project's to keep: without it, reopening the file undoes it.
             target.LevelingDelay = source.LevelingDelay;
+            // Where the remaining work of a started task stops and resumes, as Project left it — what
+            // tells a split (a reschedule) from a task that simply continues.
+            if (target.ActualStart is not null && target.ActualFinish is null)
+            {
+                target.Stop = source.Stop;
+                target.Resume = source.Resume;
+            }
+            // Cost is Project's sum of fixed cost and resources; MPXJ never computes it, and left as
+            // it was a fixed cost or a new assignment cost nothing.
+            if (source.Cost is not null)
+            {
+                target.Cost = source.Cost;
+            }
 
             // Progress is deliberately not copied back. Project re-importing an in-progress task
             // from XML — its own export included — moves part of the work done into remaining (a
@@ -182,6 +221,11 @@ public static class ProjectScheduler
 
             target.Start = source.Start;
             target.Finish = source.Finish;
+            if (source.Cost is not null)
+            {
+                target.Cost = source.Cost;
+            }
+
             // Project has sized it now; its dates are current again.
             Writes.ProgressRules.Resized.Remove(target);
         }

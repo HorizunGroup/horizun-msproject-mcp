@@ -260,6 +260,124 @@ public sealed class WorkingCalendar
         return day;
     }
 
+    /// <summary>
+    /// How far a date moved, in working days of this calendar, to the hour: the working time between
+    /// the two moments over the hours of a working day. This is the unit every schedule shift is
+    /// reported in — one tool said 14.21 days (calendar) for the move another called 11 working days.
+    /// </summary>
+    public double ShiftInWorkingDays(DateTime from, DateTime to)
+    {
+        if (from == to)
+        {
+            return 0;
+        }
+
+        var sign = to > from ? 1 : -1;
+        var (start, end) = sign > 0 ? (from, to) : (to, from);
+        if (_calendar is not null)
+        {
+            try
+            {
+                if (_calendar.GetWork(start, end, TimeUnit.Hours) is { } work)
+                {
+                    return Math.Round(sign * work.DurationValue / HoursPerDay, 2);
+                }
+            }
+            catch
+            {
+                // Fall back to whole days below.
+            }
+        }
+
+        return sign * WorkingDaysBetween(start, end);
+    }
+
+    /// <summary>Working hours between two moments by this calendar (negative when <paramref name="to"/> is
+    /// earlier): a half Saturday counts four hours, not a day.</summary>
+    public double WorkingHoursBetween(DateTime from, DateTime to)
+    {
+        if (from == to)
+        {
+            return 0;
+        }
+
+        var sign = to > from ? 1 : -1;
+        var (start, end) = sign > 0 ? (from, to) : (to, from);
+        if (_calendar is not null)
+        {
+            try
+            {
+                if (_calendar.GetWork(start, end, TimeUnit.Hours) is { } work)
+                {
+                    return sign * work.DurationValue;
+                }
+            }
+            catch
+            {
+                // Fall back to whole days below.
+            }
+        }
+
+        return sign * WorkingDaysBetween(start, end) * HoursPerDay;
+    }
+
+    /// <summary>The moment <paramref name="hours"/> of working time after (or, negative, before) a
+    /// moment, by this calendar's working days and their hours. Precise to the day's hours; a break
+    /// inside the day is not modelled, which moves nothing reported as a date.</summary>
+    public DateTime AddWorkingHours(DateTime from, double hours)
+    {
+        var day = from.Date;
+        var left = Math.Abs(hours);
+        var forward = hours >= 0;
+        for (var guard = 0; guard < 36500; guard++)
+        {
+            if (IsWorking(day))
+            {
+                var open = StartOn(day);
+                var close = FinishOn(day);
+                if (forward && from > open) open = from < close ? from : close;
+                if (!forward && from < close) close = from > open ? from : open;
+                var available = Math.Max(0, WorkingHoursBetween(open, close));
+                if (available >= left - 1e-9)
+                {
+                    return forward
+                        ? AdvanceWithin(day, open, close, left)
+                        : RetreatWithin(day, open, close, left);
+                }
+
+                left -= available;
+            }
+
+            day = day.AddDays(forward ? 1 : -1);
+            if (forward && from < day) from = day;
+            if (!forward && from > day.AddDays(1)) from = day.AddDays(1);
+        }
+
+        return day;
+    }
+
+    private DateTime AdvanceWithin(DateTime day, DateTime open, DateTime close, double hours)
+    {
+        var at = open;
+        while (WorkingHoursBetween(open, at) < hours - 1e-6 && at < close)
+        {
+            at = at.AddMinutes(15);
+        }
+
+        return at > close ? close : at;
+    }
+
+    private DateTime RetreatWithin(DateTime day, DateTime open, DateTime close, double hours)
+    {
+        var at = close;
+        while (WorkingHoursBetween(at, close) < hours - 1e-6 && at > open)
+        {
+            at = at.AddMinutes(-15);
+        }
+
+        return at < open ? open : at;
+    }
+
     public double WorkingDaysBetween(DateTime from, DateTime to)
     {
         var sign = to >= from ? 1 : -1;

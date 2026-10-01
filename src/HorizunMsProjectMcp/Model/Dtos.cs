@@ -35,6 +35,7 @@ public sealed record TaskDto
     public string? ActualFinish { get; init; }
     public double? WorkHours { get; init; }
     public double? Cost { get; init; }
+    public double? BaselineCost { get; init; }
     public string? BaselineStart { get; init; }
     public string? BaselineFinish { get; init; }
     public int? ParentUid { get; init; }
@@ -126,12 +127,20 @@ public sealed record RejectedWrite
     public required string Reason { get; init; }
 }
 
+/// <summary>The units a day is reported in. Shifts of the schedule are always working days.</summary>
+public static class DayUnits
+{
+    public const string Working = "working days (project calendar)";
+}
+
 public sealed record ImpactReport
 {
     public int TasksMoved { get; init; }
     public string? ProjectFinishBefore { get; init; }
     public string? ProjectFinishAfter { get; init; }
+    /// <summary>How far the finish moved, in working days of the project calendar (see the unit).</summary>
     public double ProjectFinishDeltaDays { get; init; }
+    public string ProjectFinishDeltaUnit { get; init; } = DayUnits.Working;
     public bool CriticalPathChanged { get; init; }
     public int NewNegativeFloat { get; init; }
 }

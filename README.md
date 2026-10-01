@@ -132,7 +132,9 @@ draft reports how many trades it left with nothing scheduled before them.
 **Project control** — `schedule_risk`, plus PMO aspects of the tools above
 
 - **Quantitative schedule risk** (`schedule_risk`): Monte Carlo over the network's own logic, all four
-  link types and lags, with three-point ranges per task or a default spread. P10/P50/P80/P90 finish,
+  link types and lags, with three-point ranges per task or a default spread, counted in working hours of
+  the project calendar (half Saturdays and elapsed lags included) and anchored on the schedule's own
+  finish, so the most-likely run is the schedule. P10/P50/P80/P90 finish,
   probability of a target and of the baseline, P80 contingency, risk drivers by criticality and
   sensitivity. Seeded runs repeat exactly.
 - **Period status report** (`schedule_analyze` aspect `status_report`): planned vs earned, SPI, CPI,

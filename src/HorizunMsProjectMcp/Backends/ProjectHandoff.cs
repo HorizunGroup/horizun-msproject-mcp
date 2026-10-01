@@ -45,6 +45,7 @@ public static class ProjectHandoff
         var document = XDocument.Load(path);
         var root = document.Root ?? throw new McpToolException("The MSPDI export came back empty.");
         AnchorUnassignedResource(root);
+        AnchorCalendarlessResources(root);
         KeepResourcesLevelable(project, root);
 
         var tasks = root.Element(Ns + "Tasks")?.Elements(Ns + "Task")
@@ -54,6 +55,15 @@ public static class ProjectHandoff
                     ?? new Dictionary<string, XElement>();
 
         RestoreStartedDurations(project, tasks);
+
+        // Project misreads a task's stop and resume from MSPDI (a resume of 11-03 came back 11-23); a
+        // split it has to keep is set through Project itself instead — see ProgressRules.PendingResume.
+        foreach (var task in tasks.Values)
+        {
+            task.Elements(Ns + "Stop").Remove();
+            task.Elements(Ns + "Resume").Remove();
+        }
+
         var blankRows = BlankRowsAsBlank(root, tasks);
 
         var assignments = root.Element(Ns + "Assignments");
@@ -236,6 +246,68 @@ public static class ProjectHandoff
             unassigned.SetElementValue(Ns + "CalendarUID", uid);
         }
     }
+
+    /// <summary>
+    /// A work resource with no calendar is given one by Project from its locale template — 9:00-13:00
+    /// and 15:00-19:00 on a Spanish install — and every task it works moves to those hours: durations
+    /// lost a quarter-day, finishes landed at 19:00, and the critical path collapsed. Resources created
+    /// by 1.4.1 on a file read from disk were saved like that. As in Project, a resource with no
+    /// calendar of its own works the project's.
+    /// </summary>
+    private static void AnchorCalendarlessResources(XElement root)
+    {
+        var projectCalendar = Text(root, "CalendarUID");
+        var calendars = root.Element(Ns + "Calendars");
+        var resources = root.Element(Ns + "Resources");
+        if (projectCalendar is null || calendars is null || resources is null)
+        {
+            return;
+        }
+
+        var known = calendars.Elements(Ns + "Calendar").Select(c => Text(c, "UID")).ToHashSet();
+        var next = calendars.Elements(Ns + "Calendar")
+            .Select(c => int.TryParse(Text(c, "UID"), out var n) ? n : 0)
+            .DefaultIfEmpty(0).Max() + 1;
+
+        foreach (var resource in resources.Elements(Ns + "Resource"))
+        {
+            var isWork = Text(resource, "Type") is null or "1";
+            if (Text(resource, "UID") is null or "0" || !isWork
+                || Text(resource, "CalendarUID") is { } uid && known.Contains(uid))
+            {
+                continue;
+            }
+
+            calendars.Add(new XElement(Ns + "Calendar",
+                new XElement(Ns + "UID", next),
+                new XElement(Ns + "Name", Text(resource, "Name") ?? ""),
+                new XElement(Ns + "IsBaseCalendar", 0),
+                new XElement(Ns + "BaseCalendarUID", projectCalendar)));
+
+            // In its place in the schema's sequence, not appended after the baselines and rates.
+            resource.Element(Ns + "CalendarUID")?.Remove();
+            var element = new XElement(Ns + "CalendarUID", next);
+            var after = resource.Elements().FirstOrDefault(e => ResourceFieldsAfterCalendar.Contains(e.Name.LocalName));
+            if (after is null)
+            {
+                resource.Add(element);
+            }
+            else
+            {
+                after.AddBeforeSelf(element);
+            }
+
+            next++;
+        }
+    }
+
+    private static readonly HashSet<string> ResourceFieldsAfterCalendar = new()
+    {
+        "Notes", "BCWS", "BCWP", "IsGeneric", "IsInactive", "IsEnterprise", "BookingType",
+        "ActualWorkProtected", "ActualOvertimeWorkProtected", "ActiveDirectoryGUID", "CreationDate",
+        "ExtendedAttribute", "Baseline", "OutlineCode", "IsCostResource", "AssnOwner", "AssnOwnerGuid",
+        "IsBudget", "AvailabilityPeriods", "Rates", "TimephasedData",
+    };
 
     /// <summary>
     /// Writing timephased data, MPXJ recomputes the duration of a started task from its assignment —

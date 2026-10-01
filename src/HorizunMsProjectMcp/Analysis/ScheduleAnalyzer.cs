@@ -6,6 +6,8 @@ namespace Horizun.ProjectMcp.Analysis;
 
 public sealed record ScheduleAnalysis
 {
+    /// <summary>The unit of every day figure in this report.</summary>
+    public string DayUnit { get; init; } = Horizun.ProjectMcp.Model.DayUnits.Working;
     public CriticalPathReport? CriticalPath { get; init; }
     public FloatDistribution? FloatDistribution { get; init; }
     public IReadOnlyList<LinkDto>? LongestPath { get; init; }
@@ -172,13 +174,14 @@ public static class ScheduleAnalyzer
     public static IReadOnlyList<MilestoneStatus> BuildMilestones(ProjectFile project)
     {
         var result = new List<MilestoneStatus>();
+        var calendar = new WorkingCalendar(project);
 
         foreach (var task in project.Tasks.Where(t => t.Milestone && t.UniqueID is not null))
         {
             double? slip = null;
             if (task.Finish is not null && task.BaselineFinish is not null)
             {
-                slip = Math.Round((task.Finish.Value - task.BaselineFinish.Value).TotalDays, 2);
+                slip = calendar.ShiftInWorkingDays(task.BaselineFinish.Value, task.Finish.Value);
             }
 
             var status = "on_track";

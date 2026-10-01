@@ -37,7 +37,8 @@ public static class Dcma14
         DateTime statusDate,
         bool canRecalculate,
         string? budgetCodeField = null,
-        IReadOnlyCollection<int>? justifiedLags = null)
+        IReadOnlyCollection<int>? justifiedLags = null,
+        DateTime? targetFinish = null)
     {
         var leaves = ScheduleAnalyzer.Leaves(project).ToList();
         var findings = new List<Finding>();
@@ -188,10 +189,15 @@ public static class Dcma14
             unresourced, "Assign a resource, or accept the task as a level-of-effort placeholder."));
 
         // ---- 11. Missed tasks vs baseline ----
+        // DCMA counts only the tasks baselined to finish by the status date, and of those the ones that
+        // finished — or now forecast to finish — on a later day. Counting every baselined task made a
+        // schedule a week late on its first activity "miss" all 14, the future included. Compared by day:
+        // a baseline saved at 00:00 and a task finishing at 17:00 the same day is not a miss.
         var withBaseline = leaves.Where(t => t.BaselineFinish is not null).ToList();
-        var missed = withBaseline.Where(t =>
-            (t.ActualFinish is not null && t.ActualFinish > t.BaselineFinish) ||
-            (t.ActualFinish is null && t.Finish is not null && t.Finish > t.BaselineFinish))
+        var statusDay = statusDate.Date;
+        var dueByStatus = withBaseline.Where(t => t.BaselineFinish!.Value.Date <= statusDay).ToList();
+        var missed = dueByStatus.Where(t => (t.ActualFinish ?? t.Finish) is { } finished
+                                            && finished.Date > t.BaselineFinish!.Value.Date)
             .ToList();
         if (withBaseline.Count == 0)
         {
@@ -199,11 +205,19 @@ public static class Dcma14
                 "dcma_11_missed_tasks", "Missed tasks vs baseline",
                 "No baseline dates are stored in this schedule. Save a baseline before measuring against one."));
         }
+        else if (dueByStatus.Count == 0)
+        {
+            findings.Add(NotEvaluated(
+                "dcma_11_missed_tasks", "Missed tasks vs baseline",
+                $"No baselined task was due to finish by the status date ({statusDate:yyyy-MM-dd}), so none can have "
+                + "missed it yet."));
+        }
         else
         {
             findings.Add(Ratio(
-                "dcma_11_missed_tasks", "Tasks finishing later than their baseline",
-                missed.Count, withBaseline.Count, 5,
+                "dcma_11_missed_tasks",
+                $"Tasks baselined to finish by {statusDate:yyyy-MM-dd} that finished, or will, on a later day",
+                missed.Count, dueByStatus.Count, 5,
                 missed, "Investigate the drivers before re-baselining."));
         }
 
@@ -211,27 +225,36 @@ public static class Dcma14
         findings.Add(CriticalPathTest(project, leaves));
 
         // ---- 13. CPLI (Critical Path Length Index) ----
+        // Measured against a finish somebody set: the one passed in, a deadline or finish constraint on
+        // the schedule's last task, or the baseline finish. Never the MSPDI header's FinishDate — that is
+        // the finish the file had when it was last written (2027-03-17 on a schedule since re-planned to
+        // April), which made CPLI fail a schedule against a target nobody chose.
         var finish = MpxjBackend.ProjectFinish(project);
-        var start = project.ProjectProperties.StartDate ?? leaves.Min(t => t.Start);
-        var deadline = project.ProjectProperties.FinishDate;
-        if (finish is null || start is null || deadline is null)
+        // The remaining critical path, as DCMA defines it: from the data date (the status date, once the
+        // project has started) to the forecast finish.
+        var projectStart = project.ProjectProperties.StartDate ?? leaves.Min(t => t.Start);
+        var start = projectStart is not null && statusDate > projectStart ? statusDate : projectStart;
+        var (target, targetSource) = CpliTarget(leaves, finish, targetFinish);
+        if (finish is null || start is null || target is null)
         {
             findings.Add(NotEvaluated(
                 "dcma_13_cpli", "Critical Path Length Index",
-                "Needs a project start, a forecast finish, and a target finish date. Set the project's finish "
-                + "date in its properties to enable it."));
+                "Needs a target finish: pass targetFinish, set a deadline (or a finish-no-later-than constraint) "
+                + "on the finish milestone, or save a baseline. The finish date in the file's header is not "
+                + "used: it is only the finish the file had when it was last saved."));
         }
         else
         {
-            var cpLength = (finish.Value - start.Value).TotalDays;
-            var totalFloat = (deadline.Value - finish.Value).TotalDays;
+            var calendar = new WorkingCalendar(project);
+            var cpLength = calendar.WorkingDaysBetween(start.Value, finish.Value);
+            var totalFloat = calendar.WorkingDaysBetween(finish.Value, target.Value);
             var cpli = cpLength <= 0 ? 1 : (cpLength + totalFloat) / cpLength;
             findings.Add(new Finding
             {
                 Rule = "dcma_13_cpli",
                 Severity = cpli >= 0.95 ? "info" : "warning",
-                Summary = $"CPLI is {cpli:0.###} (target >= 0.95). Critical path {cpLength:0} days, "
-                          + $"float to the target finish {totalFloat:0} days.",
+                Summary = $"CPLI is {cpli:0.###} (target >= 0.95). Remaining critical path {cpLength:0} working days; "
+                          + $"float to the target finish {target:yyyy-MM-dd} ({targetSource}) {totalFloat:0} working days.",
                 Measured = Math.Round(cpli, 3),
                 Threshold = 0.95,
                 Passed = cpli >= 0.95,
@@ -482,6 +505,37 @@ public static class Dcma14
                 missing.Count, total, 5,
                 missing, "Without a budget code a task cannot be tied to the cost model or to the BIM elements.");
         }
+    }
+
+    /// <summary>The finish CPLI is measured against, and where it came from.</summary>
+    private static (DateTime? Target, string Source) CpliTarget(
+        IReadOnlyList<MPXJ.Net.Task> leaves, DateTime? finish, DateTime? explicitTarget)
+    {
+        if (explicitTarget is not null)
+        {
+            return (explicitTarget, "targetFinish");
+        }
+
+        // The tasks that end the schedule: a deadline or a finish constraint on one of them is the
+        // contract date the planner set.
+        var last = leaves.Where(t => t.Finish is not null && finish is not null && t.Finish >= finish.Value.AddDays(-1))
+            .ToList();
+        var deadline = last.Where(t => t.Deadline is not null).Select(t => t.Deadline).DefaultIfEmpty(null).Min();
+        if (deadline is not null)
+        {
+            return (deadline, "deadline on the finish");
+        }
+
+        var constrained = last.Where(t => t.ConstraintDate is not null
+                                          && t.ConstraintType is ConstraintType.FinishNoLaterThan or ConstraintType.MustFinishOn)
+            .Select(t => t.ConstraintDate).DefaultIfEmpty(null).Min();
+        if (constrained is not null)
+        {
+            return (constrained, "finish constraint");
+        }
+
+        var baseline = leaves.Where(t => t.BaselineFinish is not null).Select(t => t.BaselineFinish).DefaultIfEmpty(null).Max();
+        return baseline is not null ? (baseline, "baseline finish") : (null, "");
     }
 
     private static List<MPXJ.Net.Task> RelationsWhere(

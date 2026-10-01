@@ -119,7 +119,10 @@ public static class AnalysisTools
         string? budgetCodeField = null,
         [Description("Uids of tasks whose incoming lags or leads are justified (curing, a requested fast-track): "
                      + "left out of the lag and lead checks, and listed in the notes.")]
-        int[]? justifiedLags = null)
+        int[]? justifiedLags = null,
+        [Description("The finish CPLI (check 13) is measured against, yyyy-MM-dd. Defaults to a deadline or "
+                     + "finish constraint on the finish milestone, then the baseline finish.")]
+        string? targetFinish = null)
     {
         return SessionStore.Use(handle, session =>
         {
@@ -130,7 +133,8 @@ public static class AnalysisTools
             var canRecalculate = EnvironmentDoctor.Run(deep: false).Capabilities
                 .TryGetValue("recalculate", out var recalc) && recalc;
 
-            return Dcma14.Run(session.File, effective, canRecalculate, budgetCodeField, justifiedLags);
+            return Dcma14.Run(session.File, effective, canRecalculate, budgetCodeField, justifiedLags,
+                QueryTools.ParseDate(targetFinish));
     });
     }
 

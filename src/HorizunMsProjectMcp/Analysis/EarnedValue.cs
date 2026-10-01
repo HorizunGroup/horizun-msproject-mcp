@@ -23,16 +23,21 @@ public sealed record EvmMetrics
     /// <summary>Budgeted cost of work performed — what has been earned.</summary>
     public required double Bcwp { get; init; }
 
-    /// <summary>Actual cost of work performed — what has been spent.</summary>
-    public required double Acwp { get; init; }
+    /// <summary>Actual cost of work performed — what has been spent. Null when the schedule records
+    /// no actuals at all: an AC equal to EV would be a CPI of exactly 1 that nobody measured.</summary>
+    public required double? Acwp { get; init; }
+
+    /// <summary>Whether the schedule records any actuals at all. Explicit, because a null AC is dropped
+    /// by serializers and an absent field reads as a bug rather than as "not computable".</summary>
+    public bool ActualsRecorded => Acwp is not null;
 
     /// <summary>Budget at completion.</summary>
     public required double Bac { get; init; }
 
     public double ScheduleVariance => Math.Round(Bcwp - Bcws, 2);
-    public double CostVariance => Math.Round(Bcwp - Acwp, 2);
+    public double? CostVariance => Acwp is null ? null : Math.Round(Bcwp - Acwp.Value, 2);
     public double? Spi => Bcws <= 0 ? null : Math.Round(Bcwp / Bcws, 3);
-    public double? Cpi => Acwp <= 0 ? null : Math.Round(Bcwp / Acwp, 3);
+    public double? Cpi => Acwp is not > 0 ? null : Math.Round(Bcwp / Acwp.Value, 3);
 
     /// <summary>Estimate at completion, projected at the current cost efficiency.</summary>
     public double? Eac => Cpi is null or 0 ? null : Math.Round(Bac / Cpi.Value, 2);
@@ -43,7 +48,12 @@ public sealed record EvmMetrics
         get
         {
             var remainingBudget = Bac - Bcwp;
-            var remainingFunds = Bac - Acwp;
+            if (Acwp is null)
+            {
+                return null;
+            }
+
+            var remainingFunds = Bac - Acwp.Value;
             return remainingFunds <= 0 ? null : Math.Round(remainingBudget / remainingFunds, 3);
         }
     }
@@ -51,6 +61,8 @@ public sealed record EvmMetrics
 
 public sealed record BaselineComparison
 {
+    /// <summary>The unit of every day figure in this report.</summary>
+    public string DayUnit { get; init; } = Horizun.ProjectMcp.Model.DayUnits.Working;
     public required string StatusDate { get; init; }
     public required int BaselineNumber { get; init; }
     public required bool BaselinePresent { get; init; }
@@ -86,7 +98,7 @@ public static class EarnedValue
         // cost, then loaded hours, then duration — plenty of real schedules hold neither money nor
         // resource-loaded work, and weighting by duration is the standard method for those. It is
         // the difference between a usable report and a column of zeros.
-        var hasCost = leaves.Any(t => (t.Cost ?? 0) > 0 || (BaselineCost(t, baselineNumber) ?? 0) > 0);
+        var hasCost = leaves.Any(t => Writes.Costs.Of(t) > 0 || (BaselineCost(t, baselineNumber) ?? 0) > 0);
         var hasWork = leaves.Any(t => (MpxjMapper.Hours(t.Work) ?? 0) > 0);
         var measure = hasCost ? "cost" : hasWork ? "work_hours" : "duration_days";
 
@@ -109,6 +121,13 @@ public static class EarnedValue
         }
 
         var projectMetrics = Compute(leaves, statusDate, baselineNumber, measure, "project", null, null);
+        if (projectMetrics.Acwp is null && measure != "duration_days")
+        {
+            notes.Add(measure == "cost"
+                ? "No actual cost is recorded, so AC, the cost variance, CPI, EAC and TCPI cannot be computed — "
+                  + "they are null, not 1. Record actual costs to read them."
+                : "No actual work is recorded, so AC, the cost variance, CPI, EAC and TCPI cannot be computed.");
+        }
 
         List<EvmMetrics>? branches = null;
         if (byBranch)
@@ -133,6 +152,9 @@ public static class EarnedValue
                 + "against at all.");
         }
 
+        var calendar = new WorkingCalendar(project);
+        double? Diff(DateTime? actual, DateTime? planned) =>
+            actual is null || planned is null ? null : calendar.ShiftInWorkingDays(planned.Value, actual.Value);
         var worst = leaves
             .Select(t => new VarianceRow
             {
@@ -169,13 +191,14 @@ public static class EarnedValue
         string measure, string scope, string? label, int? uid)
     {
         double bcws = 0, bcwp = 0, acwp = 0, bac = 0;
+        var actualsRecorded = false;
 
         foreach (var task in tasks)
         {
             // Budget for this task: the baseline value where one exists, otherwise the current plan.
             var budget = measure switch
             {
-                "cost" => BaselineCost(task, baselineNumber) ?? task.Cost ?? 0,
+                "cost" => BaselineCost(task, baselineNumber) ?? Writes.Costs.Of(task),
                 "work_hours" => MpxjMapper.Hours(BaselineWork(task, baselineNumber))
                                 ?? MpxjMapper.Hours(task.Work) ?? 0,
                 _ => MpxjMapper.Days(BaselineDuration(task, baselineNumber))
@@ -192,16 +215,17 @@ public static class EarnedValue
             var percent = (task.PercentageComplete ?? 0) / 100.0;
             bcwp += budget * Math.Clamp(percent, 0, 1);
 
-            // ACWP — what was actually spent or worked. A duration-weighted schedule keeps no
-            // independent record of effort, so cost performance is simply not observable there and
-            // ACWP collapses onto earned value.
+            // ACWP — what was actually spent or worked, as recorded. Where nothing is recorded it is
+            // not observable: it used to collapse onto earned value, which reported a CPI of 1 that
+            // status_report and the S-curve rightly called not computable.
             var actual = measure switch
             {
                 "cost" => task.ActualCost,
                 "work_hours" => MpxjMapper.Hours(task.ActualWork),
                 _ => null,
             };
-            acwp += actual ?? (budget * Math.Clamp(percent, 0, 1));
+            acwp += actual ?? 0;
+            actualsRecorded |= actual is > 0;
         }
 
         return new EvmMetrics
@@ -213,7 +237,7 @@ public static class EarnedValue
             Tasks = tasks.Count,
             Bcws = Math.Round(bcws, 2),
             Bcwp = Math.Round(bcwp, 2),
-            Acwp = Math.Round(acwp, 2),
+            Acwp = actualsRecorded ? Math.Round(acwp, 2) : null,
             Bac = Math.Round(bac, 2),
         };
     }
@@ -252,8 +276,6 @@ public static class EarnedValue
         }
     }
 
-    private static double? Diff(DateTime? actual, DateTime? baseline) =>
-        actual is null || baseline is null ? null : Math.Round((actual.Value - baseline.Value).TotalDays, 2);
 
     // Baseline 0 lives on the dedicated properties; 1..10 are the numbered slots.
     private static DateTime? BaselineStart(MPXJ.Net.Task t, int n) =>

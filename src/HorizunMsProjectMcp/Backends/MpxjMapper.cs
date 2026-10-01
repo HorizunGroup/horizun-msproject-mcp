@@ -120,6 +120,7 @@ public static class MpxjMapper
             ActualFinish = Iso(task.ActualFinish),
             WorkHours = Hours(task.Work),
             Cost = task.Cost,
+            BaselineCost = task.BaselineCost,
             BaselineStart = Iso(task.BaselineStart),
             BaselineFinish = Iso(task.BaselineFinish),
             ParentUid = task.ParentTask?.UniqueID,

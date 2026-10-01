@@ -36,6 +36,8 @@ public sealed record RecoveryOption
 
 public sealed record RecoveryReport
 {
+    /// <summary>The unit of every day figure in this report.</summary>
+    public string DayUnit { get; init; } = Horizun.ProjectMcp.Model.DayUnits.Working;
     public required string StatusDate { get; init; }
     public required string? ForecastFinish { get; init; }
     public string? TargetFinish { get; init; }
@@ -283,7 +285,7 @@ public static class RecoveryPlanner
 
                         try
                         {
-                            target.Predecessors.Remove(relation);
+                            Writes.Links.Remove(clone, relation);
                             target.AddPredecessor(new Relation.Builder(clone)
                                 .PredecessorTask(relation.PredecessorTask!)
                                 .SuccessorTask(target)
@@ -351,7 +353,7 @@ public static class RecoveryPlanner
                                                   ?? MpxjMapper.Days(relation.PredecessorTask!.Duration) ?? 0;
                             var lagDays = Math.Max(0, Math.Round(predecessorDays / 2, 1)
                                                       + (MpxjMapper.Days(relation.Lag) ?? 0));
-                            target.Predecessors.Remove(relation);
+                            Writes.Links.Remove(clone, relation);
                             target.AddPredecessor(new Relation.Builder(clone)
                                 .PredecessorTask(relation.PredecessorTask!)
                                 .SuccessorTask(target)

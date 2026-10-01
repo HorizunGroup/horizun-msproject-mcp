@@ -6,6 +6,94 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-30
+
+An end-to-end dry run of 1.4.1 with Microsoft Project 16 as the engine: a structure schedule
+generated from a Revit model, then QA, logic fixes, a Colombian calendar, resources, baseline, progress,
+rescheduling, earned value, recovery, scenarios and risk. It found ten defects. Each now has a check, in the new
+`field-report-test.py` (internal engine) or in `project-engine-test.py` (Project itself).
+
+### Fixed
+
+- **Assigning resources moved the schedule.** A resource created on a schedule read from disk was
+  linked to its own calendar before that calendar had an id, so it went to Project with no calendar, and
+  its calendar went as an unrelated base calendar. Project gave it the locale's (9:00-13:00,
+  15:00-19:00). One crew assigned to 17 tasks cut a quarter-day off 13 of them (22 d → 21.75 d), put
+  finishes at 18:00 and 19:00, and collapsed the critical path to 3 tasks. `update calendar` on such a
+  resource failed with "The resource calendar did not survive the write". The calendar now gets its id
+  first. Files already saved with the defect have their calendar-less resources anchored to the project
+  calendar in the hand-off. Verified with Project: the same assignment now moves no task.
+- **`links_write` refused links for a cycle through a link it had removed.** An unlink removed the link
+  from the successor but not from the predecessor's successor list, which cycle detection walked. A link
+  after an unlink in the same batch was refused. After an applied unlink the stale list stayed in the
+  session, so a dry run (on a fresh copy) accepted what the real apply refused, until the file was
+  reopened. Links are now removed from both ends, and cycles are found from the predecessors the file is
+  written from. The internal engine, recovery and DCMA open-end checks read the same lists, so they
+  are fixed too.
+- **`save_baseline` stored a budget of 0** on tasks carrying a fixed cost (`budgetAfter: 0`). MPXJ never
+  computes a task's cost, so a fixed cost written with `tasks_write` left it at 0. A task's cost is now
+  fixed cost plus its resources, kept in step on every write and taken back from Project when it
+  calculates. Baselines, scenarios, earned value, the S-curve forecast and the status report use it.
+- **`schedule_scenarios` costed every scenario at 0** with 4,000 M in fixed costs. Same cause, same fix.
+- **`baseline_compare` reported AC = EV and CPI = 1 with no actual cost recorded**, while the S-curve and
+  the status report rightly said CPI could not be computed. With no actuals, AC, cost variance, CPI, EAC
+  and TCPI are now null, with a note saying why, and `actualsRecorded: false` says so explicitly (a
+  null is dropped from the JSON).
+- **`reschedule_incomplete` left the task in progress where it was and dragged the start milestone.**
+  Measured against Project's own "reschedule uncompleted work to start after" (UpdateProject):
+  - The remaining work of a task in progress now resumes after the status date, as Project does by
+    splitting the task, and matches it to the minute (`project-engine-test.py`).
+  - Project only splits where "Split in-progress tasks" is on. That is its default, but MPXJ writes it
+    as off on everything it creates, so the operation switches it on and says so.
+  - Project keeps such a split only in day-by-day work it does not read back from MSPDI (measured three
+    ways). The resume date is kept in the schedule and set through Project on every calculation, so it
+    survives later writes, saves and reopening.
+  - A task not marked started whose successors have started (an "Inicio" milestone) is no longer moved
+    past the status date with a constraint and negative float. It is named, with the advice to mark it
+    complete.
+  - Work resumes at the first working moment after the status date: after 17:00 when the status date
+    has a time, and after the whole day when it is given as a day.
+- **DCMA 13 (CPLI) measured against the MSPDI header's FinishDate**, which is only the finish the file had
+  when last saved (2027-03-17 on a schedule since re-planned to April). It now uses, in order:
+  `targetFinish` (new parameter), a deadline or finish constraint on the finish, or the baseline
+  finish. It is not evaluated when none exists. It measures the remaining critical path from the data
+  date, in working days.
+- **DCMA 11 counted future tasks as missed** (14 of 14). As DCMA defines it, it now counts only tasks
+  baselined to finish by the status date, comparing days so a baseline saved at 00:00 is no miss.
+- **`project_health` notes said levelling and .mpp writing "stay false"** while the matrix, correctly,
+  said true. The note is now written from the matrix.
+- **Day figures mixed units**: `tasks_write` reported 14.21 (calendar) days for the shift that recovery
+  and the status report called 11 working days. Every schedule shift (write impact, change log,
+  milestone slip, baseline variances) is now in working days of the project calendar, to the hour, and
+  every report says so in `dayUnit` / `projectFinishDeltaUnit`.
+- **`schedule_risk`'s most-likely run finished 11 working days before the schedule it simulated.** It
+  counted whole calendar days (a 4-hour Saturday as a full day) and elapsed lags (`3ed` curing) as
+  working days. It now counts working hours of the project calendar, takes an elapsed lag as the working
+  time it spans, and places every run relative to the schedule's own finish.
+- **"Microsoft Project opened the working copy but it could not be found among its documents"**, twice in
+  a row. Project can still be importing when FileOpenEx returns. The document is now looked for again
+  for a few seconds, and the active document is checked too. This could not be provoked on demand, so
+  the retry itself is not exercised.
+
+### Added
+
+- `schedule_generate` `columnsWithLevelAbove`. Revit gives a column its base level and a beam its top
+  level, so grouped as modelled, the columns from 02 to 03 were scheduled before slab 02, which carries
+  them. With the option, columns go with the level they carry and each level starts when the one below
+  is finished: slab 01, columns 01-02, beams 02, slab 02. Without it, the report now warns whenever
+  columns are present.
+- `schedule_qa` `targetFinish` for CPLI.
+- `tasks_query` returns `baselineCost`.
+
+### Verified
+
+- With Project 16 as the engine: `acceptance-test.py` 65/65, `scheduler-test.py` 45/45, and
+  `project-engine-test.py` (34 checks), including the two new sections: a crew assigned on a
+  file read from disk with a half Saturday, and `reschedule_incomplete` against UpdateProject.
+- On copies of the dry run's own files: assigning the crew to `Mirador_Estructura_v3_revisado.xml` moves
+  nothing; rescheduling with the foundation at 65% gives Project's 2026-11-12 09:36; `schedule_risk` on
+  `v4_control` puts its most-likely run on the schedule's 2027-05-10.
+
 ## [1.4.1] - 2026-09-28
 
 1.4.0 run against Microsoft Project itself (16, Spanish), on a copy of the real schedule and on the
