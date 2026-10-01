@@ -19,6 +19,10 @@ public sealed record ModelBuildReport
     public required IReadOnlyList<string> LevelOrder { get; init; }
     public string? LinkFile { get; init; }
     public required IReadOnlyList<string> Notes { get; init; }
+
+    /// <summary>Trades placed in an order no building is built in — a slab before the columns that carry
+    /// it, installations before the structure. The schedule is built as asked; these say what to fix.</summary>
+    public IReadOnlyList<string> SequenceWarnings { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>
@@ -104,6 +108,7 @@ public static class ModelScheduleBuilder
 
         var trades = usable.GroupBy(TradeOf).OrderBy(RankOf).ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase).ToList();
         var tradeOrder = trades.Select(g => g.Key).ToList();
+        var sequenceWarnings = SequenceWarnings(trades);
         var unranked = trades.Where(g => RankOf(g) == patterns.Count).Select(g => g.Key).ToList();
         if (unranked.Count > 0)
         {
@@ -185,13 +190,16 @@ public static class ModelScheduleBuilder
         var fromRates = 0;
         var assumed = 0;
         var previousOnLevel = new Dictionary<string, MPXJ.Net.Task>(StringComparer.OrdinalIgnoreCase); // trade -> task on the level below
-        MPXJ.Net.Task? lastOfLevelBelow = null;
+        // The structure that carries the next level: its last structural task, never the installations
+        // or finishes that follow it on that level.
+        MPXJ.Net.Task? structureBelow = null;
 
         foreach (var level in levelOrder)
         {
             var summary = NewTask(null, level);
             summary.Summary = true;
             MPXJ.Net.Task? previousTrade = null;
+            MPXJ.Net.Task? structureHere = null;
 
             foreach (var trade in trades)
             {
@@ -242,12 +250,13 @@ public static class ModelScheduleBuilder
                     Link(below, task);
                 }
 
-                // Building up: a level starts once the level below is finished (its last trade, the slab).
-                var afterLevelBelow = columnsWithLevelAbove && previousTrade is null && lastOfLevelBelow is not null
-                                      && !ReferenceEquals(lastOfLevelBelow, below);
+                // Building up: a level starts once the structure below carries it (its slab) — not once the
+                // pipes and ducts of the level below are in.
+                var afterLevelBelow = columnsWithLevelAbove && previousTrade is null && structureBelow is not null
+                                      && !ReferenceEquals(structureBelow, below);
                 if (afterLevelBelow)
                 {
-                    Link(lastOfLevelBelow!, task);
+                    Link(structureBelow!, task);
                 }
 
                 if (previousTrade is null && !previousOnLevel.ContainsKey(trade.Key) && !afterLevelBelow)
@@ -257,6 +266,10 @@ public static class ModelScheduleBuilder
 
                 previousTrade = task;
                 previousOnLevel[trade.Key] = task;
+                if (IsStructural(trade))
+                {
+                    structureHere = task;
+                }
 
                 mappings.Add(new BimMapping
                 {
@@ -271,7 +284,7 @@ public static class ModelScheduleBuilder
                 });
             }
 
-            lastOfLevelBelow = previousTrade ?? lastOfLevelBelow;
+            structureBelow = structureHere ?? previousTrade ?? structureBelow;
         }
 
         var finish = NewTask(null, "Fin de obra");
@@ -309,6 +322,11 @@ public static class ModelScheduleBuilder
             notes.Add($"{skipped} element(s) had neither a code nor a category and were left out.");
         }
 
+        foreach (var warning in sequenceWarnings)
+        {
+            notes.Insert(0, "WARNING: " + warning);
+        }
+
         notes.Add("Logic is a plain construction sequence: trade after trade on each level, each trade level by "
                   + "level, from a start to a finish milestone. Review it with schedule_qa and adjust with links_write.");
 
@@ -326,7 +344,75 @@ public static class ModelScheduleBuilder
             LevelOrder = levelOrder,
             LinkFile = linkFile,
             Notes = notes,
+            SequenceWarnings = sequenceWarnings,
         };
+    }
+
+    /// <summary>The step of the standard building sequence a trade belongs to, whatever order was asked
+    /// for; null when it matches none.</summary>
+    private static int? StandardStep(IEnumerable<BimElement> group)
+    {
+        var e = group.First();
+        var text = $"{e.Code} {e.Category} {e.Family} {e.Type}".ToLowerInvariant();
+        for (var i = 0; i < DefaultSequence.Length; i++)
+        {
+            if (DefaultSequence[i].Split('|').Any(p => p.Length > 0 && text.Contains(p)))
+            {
+                return i;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The steps up to the slab (excavation, foundations, columns, framing, floors): the order
+    /// among them, and their place before everything else, is how a building stands up.</summary>
+    private const int LastStructuralStep = 4;
+
+    private static bool IsStructural(IEnumerable<BimElement> group)
+    {
+        var e = group.First();
+        var text = $"{e.Code} {e.Category} {e.Family} {e.Type}".ToLowerInvariant();
+        if (Regex.IsMatch(text, @"\b(arq|arc|mep|hid|ele|mec)[-_ ]"))
+        {
+            return false;
+        }
+
+        return StandardStep(group) is <= LastStructuralStep
+               || text.Contains("structural") || text.Contains("estructur") || Regex.IsMatch(text, @"\best[-_ ]");
+    }
+
+    /// <summary>
+    /// A structural trade placed after one that, in any building, comes after it: a slab before its
+    /// columns, beams before columns, structure after the installations.
+    /// </summary>
+    private static List<string> SequenceWarnings(IReadOnlyList<IGrouping<string, BimElement>> trades)
+    {
+        var warnings = new List<string>();
+        var stepNames = new[] { "excavation", "foundations", "columns", "beams/framing", "slabs/floors" };
+        for (var later = 0; later < trades.Count; later++)
+        {
+            if (StandardStep(trades[later]) is not { } step || step > LastStructuralStep)
+            {
+                continue;
+            }
+
+            // A retaining wall coded as structure may well precede the ground slab; a partition may not.
+            var earlier = trades.Take(later).FirstOrDefault(t => StandardStep(t) is { } s && s > step
+                                                                 && (s <= LastStructuralStep || !IsStructural(t)));
+            if (earlier is null)
+            {
+                continue;
+            }
+
+            var earlierStep = StandardStep(earlier)!.Value;
+            var what = earlierStep <= LastStructuralStep ? stepNames[earlierStep] : "work that follows the structure";
+            warnings.Add($"'{earlier.Key}' ({what}) is sequenced before '{trades[later].Key}' ({stepNames[step]}), "
+                         + "which carries or precedes it. Check 'sequence': the standard order is foundations, "
+                         + "columns, beams, slab, then walls, installations and finishes.");
+        }
+
+        return warnings;
     }
 
     private static bool IsColumn(BimElement e) =>

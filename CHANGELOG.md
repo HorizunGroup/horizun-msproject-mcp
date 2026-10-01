@@ -6,6 +6,39 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+The «Comité de obra» exercise of 2026-10-01 — three Revit models, Navisworks, Project and Power BI on one
+building — found six defects here. Each has a check in the new `comite-obra-test.py` (internal engine).
+
+### Fixed
+
+- **`schedule_generate` started each level on the pipes of the level below.** With
+  `columnsWithLevelAbove`, the first task of a level was linked to the last task of the level below, which
+  is an installation as soon as the model has any: columns 02 waited for the plumbing of 01. A level now
+  starts on the last structural task below it — its slab — and the installations run on behind.
+- **`schedule_generate` let any trade order through.** A `sequence` with the slab before its columns, beams
+  before columns, or installations before the structure now comes back with `sequenceWarnings`, also at the
+  head of the notes. The schedule is still built as asked. A structural retaining wall before the ground
+  slab is not warned about.
+- **An actual finish left the finish and the duration where they were.** Foundations planned to 5 Aug
+  and finished on 10 Aug kept a finish of 5 Aug and 22 days. As in Project, an actual finish now sets the
+  finish, takes the scheduled start as the actual start if none was recorded, and makes the duration the
+  working time between the two, all of it actual — earlier or later than planned. A new actual start on a
+  finished task does the same. A date with no time is the end of that working day, and an actual finish
+  before the actual start is refused.
+- **`schedule_recovery` said "Nothing is behind" beside an SPI of 0.818.** It measured lateness against
+  the current dates, which a reschedule moves past the status date. It now measures against the baseline,
+  as earned value does: unfinished past the baseline finish, unstarted past the baseline start, and in
+  progress with less done than planned (`behind_plan`, with `plannedPercent`). The report carries `spi`
+  and `measuredAgainst`. On the exercise's own schedule it now finds three tasks behind.
+- **DCMA 01 counted the project's start and finish milestones as missing logic**, failing a network
+  closed at both ends. The standard leaves them out, and so does the check now; it names them in the notes.
+- **`project_export` wrote a file with no extension** when the path had none. The format's extension is
+  added (`.json` for `pbip_dataset`), and the reply says so.
+- **Scenarios that add Saturdays showed a cost change of 0.** `schedule_scenarios` now counts the
+  task-hours each scenario schedules in working time it adds to the calendars (`extraTimeHours`).
+  `extraTimeCostPerHour` prices them into the cost. Without it, such a scenario says
+  `extraTimeValued: false` and its `costNote` begins "NOT VALUED", instead of reading as free.
+
 ## [1.5.0] - 2026-09-30
 
 An end-to-end dry run of 1.4.1 with Microsoft Project 16 as the engine: a structure schedule

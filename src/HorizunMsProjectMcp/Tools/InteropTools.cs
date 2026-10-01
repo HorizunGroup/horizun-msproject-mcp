@@ -58,8 +58,38 @@ public static class InteropTools
         [Description("Status date used for the earned-value block in pbip_dataset, yyyy-MM-dd.")]
         string? statusDate = null)
     {
-        return SessionStore.Use(handle, session => ExportCore(session, path, format, statusDate));
+        return SessionStore.Use(handle, session =>
+        {
+            // A path with no extension gets the format's own: a dataset named only 'mirador-pbip' was
+            // written as a file Power Query and Windows could not tell was JSON.
+            var extension = DefaultExtension(format);
+            if (extension is not null && string.IsNullOrEmpty(System.IO.Path.GetExtension(path.TrimEnd())))
+            {
+                var result = ExportCore(session, path.TrimEnd() + extension, format, statusDate);
+                return result with
+                {
+                    Notes = result.Notes.Prepend($"The path had no extension, so the file was written as '{extension}'.").ToList(),
+                };
+            }
+
+            return ExportCore(session, path, format, statusDate);
+        });
     }
+
+    private static string? DefaultExtension(string format) => format.Trim().ToLowerInvariant() switch
+    {
+        "csv" or "wbs_dictionary" => ".csv",
+        "json" or "pbip_dataset" => ".json",
+        "scurve_xlsx" => ".xlsx",
+        "mspdi" => ".xml",
+        "mpx" => ".mpx",
+        "mpp" => ".mpp",
+        "xer" => ".xer",
+        "pmxml" => ".xml",
+        "planner" => ".xml",
+        "sdef" => ".sdef",
+        _ => null,
+    };
 
     private static ExportResult ExportCore(
         ProjectSession session, string path, string format, string? statusDate)
