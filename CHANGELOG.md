@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-01
+
 The «Comité de obra» exercise of 2026-10-01 — three Revit models, Navisworks, Project and Power BI on one
 building — found six defects here. Each has a check in the new `comite-obra-test.py` (internal engine).
 
