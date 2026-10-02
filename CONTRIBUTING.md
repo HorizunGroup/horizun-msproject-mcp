@@ -14,6 +14,7 @@ python tools/robustness-test.py
 python tools/smoke-test.py
 python tools/packaging-test.py
 python tools/field-report-test.py
+python tools/comite-obra-test.py
 python tools/project-engine-test.py   # needs Windows and Microsoft Project; skips otherwise
 ```
 
