@@ -383,6 +383,12 @@ tools/
 Design rationale and the market benchmark that motivated it: [DESIGN-TOOL-SURFACE.md](DESIGN-TOOL-SURFACE.md)
 and [BENCHMARK-MCP-MSPROJECT.md](BENCHMARK-MCP-MSPROJECT.md).
 
+## Learn to direct it
+
+Horizun Hub teaches, in Spanish, how to direct AI agents in real construction and design work — and how to review what they deliver before you sign it. The course for this MCP is [Opera agentes en Microsoft Project](https://horizunhub.com/academia/microsoft-project-con-ia/?utm_source=github&utm_medium=readme&utm_campaign=horizun-msproject-mcp): short classes on real construction work, with a verifiable certificate.
+
+New to agents? Level 1 of [Opera agentes de IA desde cero](https://horizunhub.com/academia/agentes-ia-desde-cero/?utm_source=github&utm_medium=readme&utm_campaign=horizun-msproject-mcp) is free with an account.
+
 ## Licence
 
 MIT.
