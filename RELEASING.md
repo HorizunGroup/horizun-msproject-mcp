@@ -1,5 +1,7 @@
 # Releasing
 
+**Una aprobación por versión: conecta SimplySign Desktop → Approve en `firma-certum` → listo.**
+
 Every public release is signed with the Certum certificate of HORIZUN GROUP S.A.S. before anyone can
 install it, and nothing unsigned ever reaches NuGet. Published GitHub releases are immutable, so a
 mistake is fixed with a new patch version, never by replacing assets.
