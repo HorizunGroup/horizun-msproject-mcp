@@ -25,6 +25,7 @@ on:
 
 jobs:
   publish:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
 
     permissions:
@@ -172,3 +173,59 @@ jobs:
         run: |
           gh release edit '${{ github.ref_name }}' -R '${{ github.repository }}' --draft=false
           if ($LASTEXITCODE -ne 0) { throw "gh release edit failed ($LASTEXITCODE)" }
+
+  publicar-borrador-firmado:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, windows, horizun-sign]
+    environment: firma-certum
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Download and verify the signed draft package
+        id: package
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:VERSION -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid version' }
+          $tag = "v$env:VERSION"
+          $release = gh release view $tag -R '${{ github.repository }}' --json isDraft | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $release.isDraft) { throw 'A draft release is required.' }
+          $name = "HorizunMsProjectMcp.$env:VERSION.nupkg"
+          $dir = Join-Path $env:RUNNER_TEMP 'signed-package'
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          gh release download $tag -R '${{ github.repository }}' -D $dir -p $name --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download the package.' }
+          $package = Join-Path $dir $name
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead($package)
+          try {
+            $entry = @($zip.Entries | Where-Object { $_.FullName -match '/horizun-msproject-mcp\.dll$' })
+            if ($entry.Count -ne 1) { throw 'Expected exactly one project DLL.' }
+            $dll = Join-Path $dir 'horizun-msproject-mcp.dll'
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($entry[0], $dll, $true)
+          } finally { $zip.Dispose() }
+          $sig = Get-AuthenticodeSignature -LiteralPath $dll
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Thumbprint -ne 'D19F95C700EFEB78F03B6A2F9F6FBF87BF9BF8FA' -or $sig.TimeStamperCertificate.Subject -notlike '*Certum*') { throw 'Invalid Certum signature.' }
+          "package=$package" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: pablo-horizun
+      - name: Publish verified signed package to NuGet
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push '${{ steps.package.outputs.package }}' --source https://api.nuget.org/v3/index.json --api-key $env:NUGET_API_KEY --skip-duplicate
+          if ($LASTEXITCODE -ne 0) { throw 'NuGet rejected the signed package.' }
+      - name: Publish the draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          gh release edit "v$env:VERSION" -R '${{ github.repository }}' --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish the release.' }
