@@ -33,7 +33,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -132,7 +132,7 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Signs the project's own DLL inside the .nupkg, regenerates the hashes, verifies every
       # signature, uploads the signed assets to the draft (--clobber) and re-reads them. It does
