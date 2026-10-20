@@ -55,3 +55,6 @@ code yourself), then in the run choose **Re-run failed jobs** and approve the en
 
 If the job failed *after* pushing to NuGet (for example while publishing the release), re-running is safe:
 the push uses `--skip-duplicate` and the script signs only what is not already signed with our certificate.
+
+El runner no ejecuta signtool directamente: solicita la firma al servicio local por cola y verifica Authenticode y el sello Certum antes de publicar.
+
