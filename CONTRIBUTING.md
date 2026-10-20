@@ -95,10 +95,11 @@ token GitHub mints for this repository and `release.yml` specifically.
    under `.claude-plugin/`, `.codex-plugin/` and `.agents/plugins/`. `packaging-test.py` lists
    every one of them and fails until they agree.
 2. Add the release to `CHANGELOG.md`.
-3. `git tag v1.1.0 && git push origin v1.1.0`.
+3. `git tag -a v1.1.0 -m v1.1.0 && git push origin v1.1.0`. The workflow leaves a draft release and
+   waits for the signing approval; see [`RELEASING.md`](RELEASING.md).
 
 The workflow runs every suite before it packs anything and refuses to publish if the built
-version does not match the tag. A version on NuGet cannot be deleted afterwards, only hidden, which
+version does not match the tag. The package is pushed to NuGet only after its DLL is signed. A version on NuGet cannot be deleted afterwards, only hidden, which
 is why nothing ships that has not passed everything first.
 
 The trust policy lives at [nuget.org/account/trustedpublishing](https://www.nuget.org/account/trustedpublishing)
