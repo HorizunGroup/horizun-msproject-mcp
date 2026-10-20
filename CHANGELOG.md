@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-10-19
+
+### Changed
+
+- Signed binaries with the HORIZUN GROUP S.A.S. (Certum) certificate. No functional code changes.
+  The release now stays a draft until the CI signs the binaries, and only then publishes to NuGet
+  (see `RELEASING.md`).
+
 ## [1.6.0] - 2026-10-01
 
 The «Comité de obra» exercise of 2026-10-01 — three Revit models, Navisworks, Project and Power BI on one

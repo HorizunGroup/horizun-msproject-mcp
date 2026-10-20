@@ -8,6 +8,12 @@ name: publish to nuget
 # The trust is registered at nuget.org/account/trustedpublishing and is pinned to
 # HorizunGroup/horizun-msproject-mcp and to this file. Renaming this file breaks publishing
 # until the policy is updated, which is the point.
+#
+# Two jobs. `publish` builds, tests and packs, and leaves the GitHub release as a DRAFT with the
+# unsigned package and extension attached. `firmar-y-publicar` runs on the self-hosted signing
+# runner after Pablo approves the `firma-certum` environment: it signs the project's own DLL with
+# the Certum certificate (inside the .nupkg), verifies it, pushes the SIGNED package to NuGet and
+# only then publishes the release. Nothing unsigned ever reaches NuGet. See RELEASING.md.
 on:
   push:
     tags: ['v*']
@@ -22,9 +28,8 @@ jobs:
     runs-on: windows-latest
 
     permissions:
-      # id-token is what lets GitHub mint the OIDC token NuGet trusts; contents is for
-      # attaching the package to the release.
-      id-token: write
+      # contents is for attaching the package to the draft release. Nothing is pushed to
+      # NuGet from this job: that happens after signing, in firmar-y-publicar.
       contents: write
 
     steps:
@@ -89,28 +94,14 @@ jobs:
           fi
           echo "publishing HorizunMsProjectMcp.$expected.nupkg"
 
-      # Exchanges the OIDC token for a key that lives for a few minutes inside this runner.
-      # Nothing to store, nothing to rotate, nothing to leak.
-      - name: Authenticate with NuGet
-        uses: NuGet/login@v1
-        id: nuget-login
-        with:
-          user: pablo-horizun
-
-      - name: Push to NuGet
-        shell: bash
-        run: |
-          dotnet nuget push nupkg/*.nupkg \
-            --source https://api.nuget.org/v3/index.json \
-            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
-            --skip-duplicate
-
       # The .mcpb is how Claude Desktop installs this, so it has to be on the
-      # release itself: there is nowhere else for someone to get it.
-      - name: Attach the package and the extension to the release
+      # release itself: there is nowhere else for someone to get it. It is created as a
+      # draft; firmar-y-publicar signs the assets and publishes it.
+      - name: Attach the package and the extension to the draft release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
+          draft: true
           files: |
             nupkg/*.nupkg
             dist/*.mcpb
@@ -126,3 +117,58 @@ jobs:
           name: claude-desktop-extension
           path: dist/*.mcpb
           if-no-files-found: error
+
+  firmar-y-publicar:
+    # Waits for Pablo's approval of the environment (required reviewer), with SimplySign Desktop
+    # connected on the runner's machine.
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: [self-hosted, windows, horizun-sign]
+    environment: firma-certum
+
+    permissions:
+      # contents: edit the draft release; id-token: the OIDC token NuGet Trusted Publishing trusts.
+      contents: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Signs the project's own DLL inside the .nupkg, regenerates the hashes, verifies every
+      # signature, uploads the signed assets to the draft (--clobber) and re-reads them. It does
+      # not publish the release (-SinPublicar): NuGet goes first, then the release.
+      - name: Sign the release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $salida = Join-Path $env:RUNNER_TEMP 'firmado'
+          if (Test-Path $salida) { Remove-Item $salida -Recurse -Force }
+          ./scripts/firmar-release.ps1 -Repo '${{ github.repository }}' -Tag '${{ github.ref_name }}' -SinPublicar -Salida $salida
+
+      - name: Authenticate with NuGet
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: pablo-horizun
+
+      # The signed package from the output folder, not a rebuilt one.
+      - name: Push the signed package to NuGet
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          $salida = Join-Path $env:RUNNER_TEMP 'firmado'
+          $expected = "HorizunMsProjectMcp.$($env:GITHUB_REF_NAME.TrimStart('v')).nupkg"
+          $pkg = Join-Path $salida $expected
+          if (-not (Test-Path $pkg)) { throw "Signed package not found: $pkg" }
+          dotnet nuget push $pkg --source https://api.nuget.org/v3/index.json --api-key $env:NUGET_API_KEY --skip-duplicate
+          if ($LASTEXITCODE -ne 0) { throw "dotnet nuget push failed ($LASTEXITCODE)" }
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit '${{ github.ref_name }}' -R '${{ github.repository }}' --draft=false
+          if ($LASTEXITCODE -ne 0) { throw "gh release edit failed ($LASTEXITCODE)" }
